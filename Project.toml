@@ -1,0 +1,6 @@
+name = "unicorn-jl"
+uuid = "46d714ca-0d86-11eb-00be-15840351e17c"
+authors = ["lucca <lucca.fraser@gmail.com>"]
+version = "0.1.0"
+
+
