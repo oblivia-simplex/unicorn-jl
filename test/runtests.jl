@@ -2,9 +2,19 @@ using Test
 
 println("hello")
 
-using Unicorn: Machine, Emulator, Perm, reg_write, reg_read, mem_map, mem_write, emu_start, X86
+using Unicorn:
+    Machine,
+    Emulator,
+    Perm,
+    reg_write,
+    reg_read,
+    mem_map,
+    mem_write,
+    emu_start,
+    X86,
+    mem_read
 
-function test_eflags()::Bool
+function test_eflags()
 
     # 0:    4d 31 f6                 xor    r14, r14
     # 3:    45 85 f6                 test   r14d, r14d
@@ -15,10 +25,16 @@ function test_eflags()::Bool
 
     emu = Emulator(Machine.X86, Machine.MODE_64)
     reg_write(emu, X86.RegId.RIP, Int(0x0000_0000_0060_00b0))
+    @test reg_read(emu, X86.RegId.RIP) == 0x0000_0000_0060_00b0
     reg_write(emu, X86.RegId.EFLAGS, Int(0x0000_0000_0000_0246))
+    @test reg_read(emu, X86.RegId.EFLAGS) == 0x0000_0000_0000_0246
 
     mem_map(emu, address = 0x0000_0000_0060_0000, size = 0x0000_0000_0000_1000)
     mem_write(emu, address = UInt64(0x60_00b0), bytes = code)
+
+    # Test to ensure that we can read those bytes back
+    code_read = mem_read(emu, address = UInt64(0x60_00b0), size = length(code))
+    @test code_read == code
 
     emu_start(
         emu,
@@ -28,11 +44,11 @@ function test_eflags()::Bool
     )
 
     result = reg_read(emu, X86.RegId.RIP)
-    return result == 0x6000b0 + 8
+    @test result == 0x6000b0 + 8
 end
 
 
 
 @testset "Test x86_64 conditional execution" begin
-    @test test_eflags()  
+    test_eflags()
 end

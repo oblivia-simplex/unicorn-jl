@@ -1,13 +1,15 @@
 module Unicorn
 
+import Libdl
 using BitFlags
 
 __precompile__(false)
 
+
 include("./X86.jl")
 
 
-@bitflag Perm::UInt8 begin
+@bitflag Perm::UInt32 begin
     NONE = 0x0
     READ = 0x1
     WRITE = 0x2
@@ -17,27 +19,27 @@ ALL = READ | WRITE | EXEC
 
 module Machine
 @enum Arch begin
-    ARM   = 0x1
+    ARM = 0x1
     ARM64 = 0x2
-    MIPS  = 0x3
-    X86   = 0x4
-    PPC   = 0x5
+    MIPS = 0x3
+    X86 = 0x4
+    PPC = 0x5
     SPARC = 0x6
-    M68K  = 0x7
-    MAX   = 0x8
+    M68K = 0x7
+    MAX = 0x8
 end
 
 # TODO: add the rest of the modes
 @enum Mode begin
     LITTLE_ENDIAN = 0x0000_0000 # Also ARM
-    BIG_ENDIAN    = 0x4000_0000
+    BIG_ENDIAN = 0x4000_0000
 
     # for arm architectures
-    THUMB   = 0x0000_0010 # Also MICRO
-    MCLASS  = 0x0000_0020
-    V8      = 0x0000_0040
-    ARM926  = 0x0000_0080
-    ARM946  = 0x0000_0100
+    THUMB = 0x0000_0010 # Also MICRO
+    MCLASS = 0x0000_0020
+    V8 = 0x0000_0040
+    ARM926 = 0x0000_0080
+    ARM946 = 0x0000_0100
     ARM1176 = 0x0000_0200
 
     # for x86 and x86_64
@@ -79,12 +81,15 @@ end
 
 # FIXME hack
 UC_PATH = "/home/lucca/src/unicorn/libunicorn.so"
+LIBUNICORN = Libdl.dlopen(UC_PATH)
+
 
 const UcHandle = Ptr{Cvoid}
 
 function uc_free(uc::UcHandle)
     println("Freeing unicorn emulator at $(uc)...")
-    eval(:(ccall((:uc_free, $UC_PATH), Nothing, (UcHandle,), $uc)))
+    uc_free = Libdl.dlsym(LIBUNICORN, :uc_free)
+    ccall(uc_free, Nothing, (UcHandle,), uc)
 end
 
 # The unicorn emulator object
@@ -97,18 +102,9 @@ mutable struct Emulator
     Emulator(arch::Machine.Arch, mode::Machine.Mode) = begin
         println("initializing emulator with $arch, $mode")
         uc = Ref{UcHandle}()
-        # bit of a hack to get around some issues with library paths
-        err = eval(
-            :(ccall(
-                (:uc_open, $UC_PATH), # function name, library path
-                Err,          # return type
-                (UInt, UInt, Ref{UcHandle}),
-                $arch,
-                $mode,
-                $uc,
-            )),
-        )
-        check(err)
+
+        uc_open = Libdl.dlsym(LIBUNICORN, :uc_open)
+        check(ccall(uc_open, Err, (UInt, UInt, Ref{UcHandle}), arch, mode, uc))
         emu = new(arch, mode, uc[])
         finalizer(e -> uc_free(e.handle), emu)
         return emu
@@ -137,22 +133,25 @@ end
 #   for detailed error).
 #
 function mem_map(
-    emu::Emulator;
+    handle::UcHandle;
     address::UInt64 = 0x0000_0000_0000_0000,
     size::UInt = 0x0000_0000_0000_1000,
     perms::Perm = ALL,
 )
-    check(eval(
-        :(ccall(
-            (:uc_mem_map, $UC_PATH),
-            Err,
-            (UcHandle, UInt64, UInt, UInt32),
-            $(emu.handle),
-            $address,
-            $size,
-            $perms,
-        )),
+    uc_mem_map = Libdl.dlsym(LIBUNICORN, :uc_mem_map)
+    check(ccall(
+        uc_mem_map,
+        Err,
+        (UcHandle, UInt64, UInt, UInt32),
+        handle,
+        address,
+        size,
+        perms,
     ))
+end
+
+function mem_map(emu::Emulator; address = 0, size = 4096, perms::Perm = ALL)
+    mem_map(emu.handle, address = UInt64(address), size = UInt64(size), perms = perms)
 end
 
 # Emulate machine code in a specific duration of time.
@@ -168,31 +167,33 @@ end
 # @return UC_ERR_OK on success, or other value on failure (refer to uc_err enum
 #   for detailed error).
 function emu_start(
-    emu::Emulator;
-    begin_addr::UInt64 = UInt64(0),
-    until_addr::UInt64 = UInt64(0),
-    μs_timeout::UInt64 = UInt64(0),
-    inst_count::UInt64 = UInt64(0),
+    emu::Emulator,
+    begin_addr::UInt64,
+    until_addr::UInt64,
+    μs_timeout::UInt64,
+    inst_count::UInt64,
 )::Err
-    eval(
-        :(ccall(
-            (:uc_emu_start, $UC_PATH),
-            Err,
-            (UcHandle, UInt64, UInt64, UInt64, UInt),
-            $(emu.handle),
-            $begin_addr,
-            $until_addr,
-            $μs_timeout,
-            $inst_count,
-        )),
+    uc_emu_start = Libdl.dlsym(LIBUNICORN, :uc_emu_start)
+    ccall(
+        uc_emu_start,
+        Err,
+        (UcHandle, UInt64, UInt64, UInt64, UInt),
+        emu.handle,
+        begin_addr,
+        until_addr,
+        μs_timeout,
+        inst_count,
     )
+
 end
 
-function emu_start(emu::Emulator, begin_addr::Int)
-    emu_start(emu, begin_addr, 0, 0, 0)
-end
-
-function emu_start(emu::Emulator, begin_addr, until_addr, μs_timeout, inst_count)
+function emu_start(
+    emu::Emulator;
+    begin_addr = 0,
+    until_addr = 0,
+    μs_timeout = 0,
+    inst_count = 0,
+)::Err
     emu_start(
         emu,
         UInt64(begin_addr),
@@ -202,40 +203,35 @@ function emu_start(emu::Emulator, begin_addr, until_addr, μs_timeout, inst_coun
     )
 end
 
-function mem_write(emu::Emulator; address::UInt64, bytes::Vector{UInt8})::UInt
+function mem_write(handle::UcHandle; address::UInt64, bytes::Vector{UInt8})::UInt
     size = length(bytes)
     ptr = pointer(bytes)
-    err = eval(
-        :(ccall(
-            (:uc_mem_write, $UC_PATH),
-            Err,
-            (UcHandle, UInt64, (Ptr{UInt8}), UInt),
-            $(emu.handle),
-            $address,
-            $ptr,
-            $size,
-        )),
-    )
-    check(err)
+    uc_mem_write = Lib.dlsym(LIBUNICORN, :uc_mem_write)
+    check(ccall(
+        uc_mem_write,
+        Err,
+        (UcHandle, UInt64, (Ptr{UInt8}), UInt),
+        handle,
+        address,
+        ptr,
+        size,
+    ))
     size
 end
 
-function reg_read(emu::Emulator, regid::Int)::UInt64
+function mem_write(emu::Emulator; address::UInt64, bytes::Vector{UInt8})::UInt
+    mem_write(emu.handle, address = address, bytes = bytes)
+end
+
+function reg_read(handle::UcHandle, regid::Int)::UInt64
 
     value = Vector{UInt64}(undef, 1)
     value[1] = 0x0000_0000_0000_0000
     println("value = $value")
 
-    check(eval(
-        :(ccall(
-            (:uc_reg_read, $UC_PATH),
-            Err,
-            (UcHandle, Int, Ptr{UInt64}),
-            $(emu.handle),
-            $regid,
-            $value,
-        )),
-    ))
+    uc_reg_read = Libdl.dlsym(LIBUNICORN, :uc_reg_read)
+    check(ccall(uc_reg_read, Err, (UcHandle, Int, Ptr{UInt64}), handle, regid, value))
+
 
     println("value = $value")
 
@@ -243,21 +239,24 @@ function reg_read(emu::Emulator, regid::Int)::UInt64
 
 end
 
+function reg_read(handle::UcHandle, regid::X86.RegId.Register)::UInt64
+    reg_read(handle, Int(regid))
+end
+
 function reg_read(emu::Emulator, regid::X86.RegId.Register)::UInt64
-    reg_read(emu::Emulator, Int(regid))
+    reg_read(emu.handle, regid)
 end
 
 function reg_write(emu::Emulator, regid::Int, value::Int64)
 
-    check(eval(
-        :(ccall(
-            (:uc_reg_write, $UC_PATH),
-            Err,
-            (UcHandle, Int, Ref{Clonglong}),
-            $(emu.handle),
-            $regid,
-            $(Ref(value)),
-        )),
+    uc_reg_write = Libdl.dlsym(LIBUNICORN, :uc_reg_write)
+    check(ccall(
+        uc_reg_write,
+        Err,
+        (UcHandle, Int, Ref{Int64}),
+        emu.handle,
+        regid,
+        Ref(value),
     ))
 
 end
@@ -267,4 +266,70 @@ function reg_write(emu::Emulator, regid::X86.RegId.Register, value::Int64)
 end
 
 
+function mem_read(handle::UcHandle, address::UInt64, size::UInt64)::Vector{UInt8}
+
+    bytes = Vector{UInt8}(undef, size)
+
+    uc_mem_read = Libdl.dlsym(LIBUNICORN, :uc_mem_read)
+    check(ccall(
+        uc_mem_read,
+        Err,
+        (UcHandle, UInt64, Ptr{UInt8}, UInt64),
+        handle,
+        address,
+        pointer(bytes),
+        size,
+    ))
+
+    bytes
+end
+
+function mem_read(emu::Emulator; address = 0, size = 0)::Vector{UInt8}
+    mem_read(emu.handle, UInt64(address), UInt64(size))
+end
+
+# This method is primarily to be used in hooks, where we have access only
+# to the bare UC handle, and not the Emulator wrapper struct.
+function uc_stop(handle::UcHandle)
+    uc_emu_stop = Libdl.dlsym(LIBUNICORN, :uc_emu_stop)
+    check(ccall(uc_emu_stop, Err, (UcHandle,), handle))
+end
+
+
+struct MemRegion
+    from::UInt64
+    to::UInt64
+    perms::Perm
+    MemRegion() = new(0, 0, Perm(0))
+end
+
+function mem_regions(handle::UcHandle) #::Vector{MemRegion}
+
+    # FIXME: I don't like having to preallocate the regions array
+    # like this. Is there a way to let the C code set it?
+    #regions = fill(Ref(fill(MemRegion(),1)), 1024)
+    regions = Vector{MemRegion}(undef, 1024)
+    count = Vector{UInt32}(undef, 1)
+    count[1] = 0x0000_0000
+
+    uc_mem_regions = Libdl.dlsym(LIBUNICORN, :uc_mem_regions)
+    check(ccall(
+        uc_mem_regions,
+        Err,
+        (UcHandle, Ref{MemRegion}, Ptr{UInt32}),
+        handle,
+        regions,
+        pointer(count),
+    ))
+
+    regions[1:count[1]]
+    #[unsafe_load(reg) for reg in regions[1:count[1]]]
+end
+
+# TODO:
+# - uc_mem_regions
+# - hooks!
+# - maybe batch read/write
+
+# End of Module
 end
