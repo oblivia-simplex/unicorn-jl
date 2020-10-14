@@ -2,6 +2,10 @@ module Unicorn
 
 using BitFlags
 
+__precompile__(false)
+
+include("./X86.jl")
+
 
 @bitflag Perm::UInt8 begin
     NONE = 0x0
@@ -11,28 +15,29 @@ using BitFlags
 end
 ALL = READ | WRITE | EXEC
 
+module Machine
 @enum Arch begin
-    ARM = 0x1
+    ARM   = 0x1
     ARM64 = 0x2
-    MIPS = 0x3
-    X86 = 0x4
-    PPC = 0x5
+    MIPS  = 0x3
+    X86   = 0x4
+    PPC   = 0x5
     SPARC = 0x6
-    M68K = 0x7
-    MAX = 0x8
+    M68K  = 0x7
+    MAX   = 0x8
 end
 
 # TODO: add the rest of the modes
 @enum Mode begin
     LITTLE_ENDIAN = 0x0000_0000 # Also ARM
-    BIG_ENDIAN = 0x4000_0000
+    BIG_ENDIAN    = 0x4000_0000
 
     # for arm architectures
-    THUMB = 0x0000_0010 # Also MICRO
-    MCLASS = 0x0000_0020
-    V8 = 0x0000_0040
-    ARM926 = 0x0000_0080
-    ARM946 = 0x0000_0100
+    THUMB   = 0x0000_0010 # Also MICRO
+    MCLASS  = 0x0000_0020
+    V8      = 0x0000_0040
+    ARM926  = 0x0000_0080
+    ARM946  = 0x0000_0100
     ARM1176 = 0x0000_0200
 
     # for x86 and x86_64
@@ -40,12 +45,12 @@ end
     MODE_32 = 1 << 2
     MODE_64 = 1 << 3
 end
-
+end
 
 @enum Err begin
     OK = 0
     NOMEM = 1
-    ARCH = 2  # Unsupported Architecture
+    ARCH = 2  # Unsupported Machine
     HANDLE = 3  # Invalid Handle
     MODE = 4  # Invalid or unsupported mode
     VERS = 5  # Unsupported version
@@ -84,12 +89,12 @@ end
 
 # The unicorn emulator object
 mutable struct Emulator
-    arch::Arch
-    mode::Mode
+    arch::Machine.Arch
+    mode::Machine.Mode
     handle::UcHandle
 
     # Constructor
-    Emulator(arch::Arch, mode::Mode) = begin
+    Emulator(arch::Machine.Arch, mode::Machine.Mode) = begin
         println("initializing emulator with $arch, $mode")
         uc = Ref{UcHandle}()
         # bit of a hack to get around some issues with library paths
@@ -131,9 +136,12 @@ end
 # @return UC_ERR_OK on success, or other value on failure (refer to uc_err enum
 #   for detailed error).
 #
-function mem_map(emu::Emulator, address::UInt, size::UInt, perms::Perm)
-    address = UInt64(address)
-    size = UInt64(size)
+function mem_map(
+    emu::Emulator;
+    address::UInt64 = 0x0000_0000_0000_0000,
+    size::UInt = 0x0000_0000_0000_1000,
+    perms::Perm = ALL,
+)
     check(eval(
         :(ccall(
             (:uc_mem_map, $UC_PATH),
@@ -160,15 +168,15 @@ end
 # @return UC_ERR_OK on success, or other value on failure (refer to uc_err enum
 #   for detailed error).
 function emu_start(
-    emu::Emulator,
-    begin_addr::Int,
-    until_addr::Int,
-    μs_timeout::Int,
-    inst_count::Int,
+    emu::Emulator;
+    begin_addr::UInt64 = UInt64(0),
+    until_addr::UInt64 = UInt64(0),
+    μs_timeout::UInt64 = UInt64(0),
+    inst_count::UInt64 = UInt64(0),
 )::Err
     eval(
         :(ccall(
-            (:uc_mem_map, $UC_PATH),
+            (:uc_emu_start, $UC_PATH),
             Err,
             (UcHandle, UInt64, UInt64, UInt64, UInt),
             $(emu.handle),
@@ -184,8 +192,17 @@ function emu_start(emu::Emulator, begin_addr::Int)
     emu_start(emu, begin_addr, 0, 0, 0)
 end
 
+function emu_start(emu::Emulator, begin_addr, until_addr, μs_timeout, inst_count)
+    emu_start(
+        emu,
+        UInt64(begin_addr),
+        UInt64(until_addr),
+        UInt64(μs_timeout),
+        UInt64(inst_count),
+    )
+end
 
-function mem_write(emu::Emulator, address::UInt64, bytes::Vector{UInt8})::UInt
+function mem_write(emu::Emulator; address::UInt64, bytes::Vector{UInt8})::UInt
     size = length(bytes)
     ptr = pointer(bytes)
     err = eval(
@@ -203,7 +220,51 @@ function mem_write(emu::Emulator, address::UInt64, bytes::Vector{UInt8})::UInt
     size
 end
 
+function reg_read(emu::Emulator, regid::Int)::UInt64
 
-greet() = println("Welcome to the Unicorn module.")
+    value = Vector{UInt64}(undef, 1)
+    value[1] = 0x0000_0000_0000_0000
+    println("value = $value")
+
+    check(eval(
+        :(ccall(
+            (:uc_reg_read, $UC_PATH),
+            Err,
+            (UcHandle, Int, Ptr{UInt64}),
+            $(emu.handle),
+            $regid,
+            $value,
+        )),
+    ))
+
+    println("value = $value")
+
+    return value[1]
+
+end
+
+function reg_read(emu::Emulator, regid::X86.RegId.Register)::UInt64
+    reg_read(emu::Emulator, Int(regid))
+end
+
+function reg_write(emu::Emulator, regid::Int, value::Int64)
+
+    check(eval(
+        :(ccall(
+            (:uc_reg_write, $UC_PATH),
+            Err,
+            (UcHandle, Int, Ref{Clonglong}),
+            $(emu.handle),
+            $regid,
+            $(Ref(value)),
+        )),
+    ))
+
+end
+
+function reg_write(emu::Emulator, regid::X86.RegId.Register, value::Int64)
+    reg_write(emu, Int(regid), value)
+end
+
 
 end
