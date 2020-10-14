@@ -12,7 +12,10 @@ using Unicorn:
     mem_write,
     emu_start,
     X86,
-    mem_read
+    mem_read,
+    mem_regions
+
+using Unicorn
 
 function test_eflags()
 
@@ -47,8 +50,29 @@ function test_eflags()
     @test result == 0x6000b0 + 8
 end
 
+function test_mem_regions()
 
+    emu = Emulator(Machine.ARM, Machine.THUMB)
+
+    params = [
+        (0x40_000, 0x8000, Unicorn.READ),
+        (0x1000, 0x1000, Unicorn.READ | Unicorn.WRITE),
+        (0x8000, 0x2000, Unicorn.ALL),
+    ]
+
+    for (address, size, perms) in params
+        mem_map(emu, address = address, size = size, perms = perms)
+    end
+
+    regions = mem_regions(emu)
+
+    for (p, r) in zip(params, regions)
+        @test r.from == p[1] && r.to == p[1] + p[2] - 1 && r.perms == p[3]
+    end
+
+end
 
 @testset "Test x86_64 conditional execution" begin
     test_eflags()
+    test_mem_regions()
 end

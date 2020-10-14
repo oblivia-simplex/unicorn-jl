@@ -8,6 +8,7 @@ __precompile__(false)
 
 include("./X86.jl")
 
+const Register = Union{X86.RegId.Register,}
 
 @bitflag Perm::UInt32 begin
     NONE = 0x0
@@ -100,7 +101,6 @@ mutable struct Emulator
 
     # Constructor
     Emulator(arch::Machine.Arch, mode::Machine.Mode) = begin
-        println("initializing emulator with $arch, $mode")
         uc = Ref{UcHandle}()
 
         uc_open = Libdl.dlsym(LIBUNICORN, :uc_open)
@@ -206,7 +206,7 @@ end
 function mem_write(handle::UcHandle; address::UInt64, bytes::Vector{UInt8})::UInt
     size = length(bytes)
     ptr = pointer(bytes)
-    uc_mem_write = Lib.dlsym(LIBUNICORN, :uc_mem_write)
+    uc_mem_write = Libdl.dlsym(LIBUNICORN, :uc_mem_write)
     check(ccall(
         uc_mem_write,
         Err,
@@ -225,44 +225,60 @@ end
 
 function reg_read(handle::UcHandle, regid::Int)::UInt64
 
-    value = Vector{UInt64}(undef, 1)
-    value[1] = 0x0000_0000_0000_0000
-    println("value = $value")
+    value = Ref{UInt64}()
+    value[] = 0x0000_0000_0000_0000
 
     uc_reg_read = Libdl.dlsym(LIBUNICORN, :uc_reg_read)
     check(ccall(uc_reg_read, Err, (UcHandle, Int, Ptr{UInt64}), handle, regid, value))
 
-
-    println("value = $value")
-
-    return value[1]
+    return value[]
 
 end
 
-function reg_read(handle::UcHandle, regid::X86.RegId.Register)::UInt64
+function reg_read(handle::UcHandle, regid::R)::UInt64 where { R <: Register }
     reg_read(handle, Int(regid))
 end
 
-function reg_read(emu::Emulator, regid::X86.RegId.Register)::UInt64
+function reg_read(emu::Emulator, regid::R)::UInt64 where { R <: Register } 
     reg_read(emu.handle, regid)
 end
 
-function reg_write(emu::Emulator, regid::Int, value::Int64)
+# FIXME: this doesn't work yet
+# function reg_read_batch(handle::UcHandle, regids::Vector{Int})
+#     count = length(regids)
+#     values = Ref{Ptr{UInt64}}() #Vector{UInt64}(undef, count)
+# 
+#     uc_reg_read_batch = Libdl.dlsym(LIBUNICORN, :uc_reg_read_batch)
+# 
+#     check(ccall(
+#         uc_reg_read_batch,
+#         Err,
+#         (UcHandle, Ptr{Int}, Ref{Ptr{UInt64}}, Int),
+#         handle,
+#         pointer(regids),
+#         values,
+#         count,
+#     ))
+# 
+#     values
+# 
+# end
+# 
+# function reg_read_batch(emu::Emulator, regids::Vector{R}) where { R <: Register }
+#     reg_read_batch(emu.handle, [Int(r) for r in regids])
+# end
+# 
+function reg_write(handle::UcHandle, regid::R, value::T) where {T<:Integer,R<:Register}
 
+    value = UInt64(value)
+    regid = Int(regid)
     uc_reg_write = Libdl.dlsym(LIBUNICORN, :uc_reg_write)
-    check(ccall(
-        uc_reg_write,
-        Err,
-        (UcHandle, Int, Ref{Int64}),
-        emu.handle,
-        regid,
-        Ref(value),
-    ))
+    check(ccall(uc_reg_write, Err, (UcHandle, Int, Ref{UInt64}), handle, regid, Ref(value)))
 
 end
 
-function reg_write(emu::Emulator, regid::X86.RegId.Register, value::Int64)
-    reg_write(emu, Int(regid), value)
+function reg_write(emu::Emulator, regid::R, value::T) where {T<:Integer,R<:Register}
+    reg_write(emu.handle, regid, value)
 end
 
 
@@ -296,7 +312,7 @@ function uc_stop(handle::UcHandle)
 end
 
 
-struct MemRegion
+mutable struct MemRegion
     from::UInt64
     to::UInt64
     perms::Perm
@@ -305,25 +321,25 @@ end
 
 function mem_regions(handle::UcHandle) #::Vector{MemRegion}
 
-    # FIXME: I don't like having to preallocate the regions array
-    # like this. Is there a way to let the C code set it?
-    #regions = fill(Ref(fill(MemRegion(),1)), 1024)
-    regions = Vector{MemRegion}(undef, 1024)
-    count = Vector{UInt32}(undef, 1)
-    count[1] = 0x0000_0000
+    regions = Ref{Ptr{MemRegion}}()
+    count = Ref{UInt32}()
+    count[] = 0x0000_0000
 
     uc_mem_regions = Libdl.dlsym(LIBUNICORN, :uc_mem_regions)
     check(ccall(
         uc_mem_regions,
         Err,
-        (UcHandle, Ref{MemRegion}, Ptr{UInt32}),
+        (UcHandle, Ref{Ptr{MemRegion}}, Ptr{UInt32}),
         handle,
         regions,
-        pointer(count),
+        count,
     ))
 
-    regions[1:count[1]]
-    #[unsafe_load(reg) for reg in regions[1:count[1]]]
+    [unsafe_load(regions[], i) for i = 1:count[]]
+end
+
+function mem_regions(emu::Emulator)
+    mem_regions(emu.handle)
 end
 
 # TODO:
