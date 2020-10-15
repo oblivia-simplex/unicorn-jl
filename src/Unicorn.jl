@@ -8,9 +8,9 @@ __precompile__(false)
 
 include("./X86.jl")
 
-const Register = Union{X86.RegId.Register,}
+const Register = Union{X86.RegId.Register}
 
-@bitflag Perm::UInt32 begin
+@bitflag Perm::Cuint begin
     NONE = 0x0
     READ = 0x1
     WRITE = 0x2
@@ -79,6 +79,26 @@ end
 struct UcException <: Exception
     code::Err
 end
+
+
+@bitflag HookType::Cuint begin
+    HOOK_INTR = 1
+    HOOK_INSN = 1 << 1
+    HOOK_CODE = 1 << 2
+    HOOK_BLOCK = 1 << 3
+    HOOK_MEM_READ_UNMAPPED = 1 << 4
+    HOOK_MEM_WRITE_UNMAPPED = 1 << 5
+    HOOK_MEM_FETCH_UNMAPPED = 1 << 6
+    HOOK_MEM_READ_PROT = 1 << 7
+    HOOK_MEM_WRITE_PROT = 1 << 8
+    HOOK_MEM_FETCH_PROT = 1 << 9
+    HOOK_MEM_READ = 1 << 10
+    HOOK_MEM_WRITE = 1 << 11
+    HOOK_MEM_FETCH = 1 << 12
+    HOOK_MEM_READ_AFTER = 1 << 13
+    HOOK_INSN_INVALID = 1 << 14
+end
+
 
 # FIXME hack
 UC_PATH = "/home/lucca/src/unicorn/libunicorn.so"
@@ -235,11 +255,11 @@ function reg_read(handle::UcHandle, regid::Int)::UInt64
 
 end
 
-function reg_read(handle::UcHandle, regid::R)::UInt64 where { R <: Register }
+function reg_read(handle::UcHandle, regid::R)::UInt64 where {R<:Register}
     reg_read(handle, Int(regid))
 end
 
-function reg_read(emu::Emulator, regid::R)::UInt64 where { R <: Register } 
+function reg_read(emu::Emulator, regid::R)::UInt64 where {R<:Register}
     reg_read(emu.handle, regid)
 end
 
@@ -340,6 +360,41 @@ end
 
 function mem_regions(emu::Emulator)
     mem_regions(emu.handle)
+end
+
+const HookHandle = Csize_t
+
+function hook_add(
+    handle::UcHandle,
+    type::HookType,
+    callback,
+    user_data,
+    begin_addr::T,
+    end_addr::T,
+   ) where {T<:Integer}
+
+    # do we need to do anything with user data? is it good enough if the
+    # callback is a closure?
+    uc_hook_add = Libdl.dlsym(LIBUNICORN, :uc_hook_add)
+    hook_handle = Ref{Csize_t}(0)
+
+    c_callback =
+        eval(:(@cfunction($callback, Nothing, (UcHandle, UInt64, UInt32, Ptr{Cvoid}))))
+
+    ccall(
+        uc_hook_add,
+        Err,
+        (UcHandle, Ref{Csize_t}, Cuint, Ptr{Cvoid}, Ptr{Cvoid}, UInt64, UInt64),
+        handle,
+        hook_handle,
+        type,
+        c_callback,
+        user_data,
+        begin_addr,
+        end_addr,
+    )
+
+    (hook_handle[], user_data)
 end
 
 # TODO:
