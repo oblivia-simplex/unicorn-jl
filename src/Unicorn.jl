@@ -133,8 +133,8 @@ const UcHandle = Ptr{Cvoid}
 
 function uc_free(uc::UcHandle)
     println("Freeing unicorn emulator at $(uc)...")
-    uc_free = Libdl.dlsym(LIBUNICORN, :uc_free)
-    ccall(uc_free, Nothing, (UcHandle,), uc)
+    uc_close = Libdl.dlsym(LIBUNICORN, :uc_close)
+    ccall(uc_close, Nothing, (UcHandle,), uc)
 end
 
 # The unicorn emulator object
@@ -386,6 +386,9 @@ function mem_regions(handle::UcHandle) #::Vector{MemRegion}
         count,
     ))
 
+    # TODO: figure out if we need to free thse with `uc_free()`
+    # I'm not really sure. if so, we should free them here, once we've
+    # copied their data out into julia structs. 
     [unsafe_load(regions[], i) for i = 1:count[]]
 end
 
@@ -632,6 +635,8 @@ function hook_del(emu::Emulator, hook_handle::Csize_t)
     hook_del(emu.handle, hook_handle)
     filter!(h -> h != hook_handle, emu.hooks)
 
+    return
+
 end
 
 function delete_all_hooks(emu::Emulator)
@@ -642,6 +647,15 @@ function delete_all_hooks(emu::Emulator)
 
 end
 
+function unicorn_version()
+    
+    uc_version = Libdl.dlsym(LIBUNICORN, :uc_version)
+    val = ccall(uc_version, UInt32, (Ptr{Cuint},Ptr{Cuint}), Ptr{Cuint}(0), Ptr{Cuint}(0))
+    minor = val & 0x0F
+    major = (val >> 8) & 0x0F
+    return Int(major), Int(minor)
+
+end
 
 
 ### End of module
