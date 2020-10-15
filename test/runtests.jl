@@ -16,7 +16,8 @@ using Unicorn:
     X86,
     mem_read,
     mem_regions,
-    code_hook_add
+    code_hook_add,
+    delete_all_hooks
 
 using Unicorn
 
@@ -65,6 +66,10 @@ function test_execution()
     # Check the data written to by the code hook callback
     @test ran_the_callback
     @test addrs == [0x60_00b6, 0x60_00b8]
+
+    @test length(emu.hooks) == 1
+    delete_all_hooks(emu)
+    @test length(emu.hooks) == 0
 end
 
 
