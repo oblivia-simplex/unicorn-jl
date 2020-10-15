@@ -3,7 +3,8 @@ using Test
 println("hello")
 
 using Unicorn:
-    Machine,
+    Arch,
+    Mode,
     Emulator,
     Perm,
     reg_write,
@@ -26,11 +27,11 @@ function test_eflags()
 
     code::Vector{UInt8} = [0x48, 0x31, 0xf6, 0x45, 0x85, 0xf6, 0x75, 0xfe, 0xf4]
 
-    emu = Emulator(Machine.X86, Machine.MODE_64)
-    reg_write(emu, X86.RegId.RIP, Int(0x0000_0000_0060_00b0))
-    @test reg_read(emu, X86.RegId.RIP) == 0x0000_0000_0060_00b0
-    reg_write(emu, X86.RegId.EFLAGS, Int(0x0000_0000_0000_0246))
-    @test reg_read(emu, X86.RegId.EFLAGS) == 0x0000_0000_0000_0246
+    emu = Emulator(Arch.X86, Mode.MODE_64)
+    reg_write(emu, X86.Register.RIP, Int(0x0000_0000_0060_00b0))
+    @test reg_read(emu, X86.Register.RIP) == 0x0000_0000_0060_00b0
+    reg_write(emu, X86.Register.EFLAGS, Int(0x0000_0000_0000_0246))
+    @test reg_read(emu, X86.Register.EFLAGS) == 0x0000_0000_0000_0246
 
     mem_map(emu, address = 0x0000_0000_0060_0000, size = 0x0000_0000_0000_1000)
     mem_write(emu, address = UInt64(0x60_00b0), bytes = code)
@@ -46,18 +47,18 @@ function test_eflags()
         inst_count = UInt64(1),
     )
 
-    result = reg_read(emu, X86.RegId.RIP)
+    result = reg_read(emu, X86.Register.RIP)
     @test result == 0x6000b0 + 8
 end
 
 function test_mem_regions()
 
-    emu = Emulator(Machine.ARM, Machine.THUMB)
+    emu = Emulator(Arch.ARM, Mode.THUMB)
 
     params = [
-        (0x40_000, 0x8000, Unicorn.READ),
-        (0x1000, 0x1000, Unicorn.READ | Unicorn.WRITE),
-        (0x8000, 0x2000, Unicorn.ALL),
+        (0x40_000, 0x8000, Perm.READ),
+        (0x1000, 0x1000, Perm.READ | Perm.WRITE),
+        (0x8000, 0x2000, Perm.ALL),
     ]
 
     for (address, size, perms) in params

@@ -1,7 +1,7 @@
 module X86
 
-module RegId
-@enum Register begin
+module Register
+@enum t begin
     INVALID_REGISTER = 0
     AH = 1
     AL = 2

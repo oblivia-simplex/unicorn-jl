@@ -1,25 +1,42 @@
 module Unicorn
 
 import Libdl
-using BitFlags
 
 __precompile__(false)
 
 
-include("./X86.jl")
+include("./architectures/ARM.jl")
+include("./architectures/ARM64.jl")
+include("./architectures/M68K.jl")
+include("./architectures/MIPS.jl")
+include("./architectures/SPARC.jl")
+include("./architectures/X86.jl")
 
-const Register = Union{X86.RegId.Register}
+const Register = Union{
+    ARM.Register.t,
+    ARM64.Register.t,
+    M68K.Register.t,
+    MIPS.Register.t,
+    SPARC.Register.t,
+    X86.Register.t,
+}
 
-@bitflag Perm::Cuint begin
+module Perm
+using BitFlags
+@bitflag t::Cuint begin
     NONE = 0x0
     READ = 0x1
     WRITE = 0x2
     EXEC = 0x4
 end
 ALL = READ | WRITE | EXEC
+end
 
-module Machine
-@enum Arch begin
+# I want dot access to enum variants, so I'm going to adopt the OCaml
+# naming convention of naming the wrapping module after the enum, and
+# naming the enum itself `t`. Do not unwrap these modules with `Using`.
+module Arch
+@enum t begin
     ARM = 0x1
     ARM64 = 0x2
     MIPS = 0x3
@@ -29,9 +46,11 @@ module Machine
     M68K = 0x7
     MAX = 0x8
 end
+end
 
 # TODO: add the rest of the modes
-@enum Mode begin
+module Mode
+@enum t begin
     LITTLE_ENDIAN = 0x0000_0000 # Also ARM
     BIG_ENDIAN = 0x4000_0000
 
@@ -50,7 +69,8 @@ end
 end
 end
 
-@enum Err begin
+module UcError
+@enum t begin
     OK = 0
     NOMEM = 1
     ARCH = 2  # Unsupported Machine
@@ -74,14 +94,17 @@ end
     RESOURCE = 20
     EXCEPTION = 21
 end
-
-
-struct UcException <: Exception
-    code::Err
 end
 
 
-@bitflag HookType::Cuint begin
+struct UcException <: Exception
+    code::UcError.t
+end
+
+
+module HookType
+using BitFlags
+@bitflag t::Cuint begin
     HOOK_INTR = 1
     HOOK_INSN = 1 << 1
     HOOK_CODE = 1 << 2
@@ -97,6 +120,7 @@ end
     HOOK_MEM_FETCH = 1 << 12
     HOOK_MEM_READ_AFTER = 1 << 13
     HOOK_INSN_INVALID = 1 << 14
+end
 end
 
 
@@ -115,24 +139,24 @@ end
 
 # The unicorn emulator object
 mutable struct Emulator
-    arch::Machine.Arch
-    mode::Machine.Mode
+    arch::Arch.t
+    mode::Mode.t
     handle::UcHandle
 
     # Constructor
-    Emulator(arch::Machine.Arch, mode::Machine.Mode) = begin
+    Emulator(arch::Arch.t, mode::Mode.t) = begin
         uc = Ref{UcHandle}()
 
         uc_open = Libdl.dlsym(LIBUNICORN, :uc_open)
-        check(ccall(uc_open, Err, (UInt, UInt, Ref{UcHandle}), arch, mode, uc))
+        check(ccall(uc_open, UcError.t, (UInt, UInt, Ref{UcHandle}), arch, mode, uc))
         emu = new(arch, mode, uc[])
         finalizer(e -> uc_free(e.handle), emu)
         return emu
     end
 end
 
-function check(result::Err)
-    if result != OK
+function check(result::UcError.t)
+    if result != UcError.OK
         throw(UcException(result))
     end
 end
@@ -156,12 +180,12 @@ function mem_map(
     handle::UcHandle;
     address::UInt64 = 0x0000_0000_0000_0000,
     size::UInt = 0x0000_0000_0000_1000,
-    perms::Perm = ALL,
+    perms::Perm.t = Perm.ALL,
 )
     uc_mem_map = Libdl.dlsym(LIBUNICORN, :uc_mem_map)
     check(ccall(
         uc_mem_map,
-        Err,
+        UcError.t,
         (UcHandle, UInt64, UInt, UInt32),
         handle,
         address,
@@ -170,7 +194,7 @@ function mem_map(
     ))
 end
 
-function mem_map(emu::Emulator; address = 0, size = 4096, perms::Perm = ALL)
+function mem_map(emu::Emulator; address = 0, size = 4096, perms::Perm.t = Perm.ALL)
     mem_map(emu.handle, address = UInt64(address), size = UInt64(size), perms = perms)
 end
 
@@ -192,11 +216,11 @@ function emu_start(
     until_addr::UInt64,
     μs_timeout::UInt64,
     inst_count::UInt64,
-)::Err
+)::UcError.t
     uc_emu_start = Libdl.dlsym(LIBUNICORN, :uc_emu_start)
     ccall(
         uc_emu_start,
-        Err,
+        UcError.t,
         (UcHandle, UInt64, UInt64, UInt64, UInt),
         emu.handle,
         begin_addr,
@@ -213,7 +237,7 @@ function emu_start(
     until_addr = 0,
     μs_timeout = 0,
     inst_count = 0,
-)::Err
+)::UcError.t
     emu_start(
         emu,
         UInt64(begin_addr),
@@ -229,7 +253,7 @@ function mem_write(handle::UcHandle; address::UInt64, bytes::Vector{UInt8})::UIn
     uc_mem_write = Libdl.dlsym(LIBUNICORN, :uc_mem_write)
     check(ccall(
         uc_mem_write,
-        Err,
+        UcError.t,
         (UcHandle, UInt64, (Ptr{UInt8}), UInt),
         handle,
         address,
@@ -249,7 +273,7 @@ function reg_read(handle::UcHandle, regid::Int)::UInt64
     value[] = 0x0000_0000_0000_0000
 
     uc_reg_read = Libdl.dlsym(LIBUNICORN, :uc_reg_read)
-    check(ccall(uc_reg_read, Err, (UcHandle, Int, Ptr{UInt64}), handle, regid, value))
+    check(ccall(uc_reg_read, UcError.t, (UcHandle, Int, Ptr{UInt64}), handle, regid, value))
 
     return value[]
 
@@ -272,7 +296,7 @@ end
 # 
 #     check(ccall(
 #         uc_reg_read_batch,
-#         Err,
+#         UcError.t,
 #         (UcHandle, Ptr{Int}, Ref{Ptr{UInt64}}, Int),
 #         handle,
 #         pointer(regids),
@@ -293,7 +317,14 @@ function reg_write(handle::UcHandle, regid::R, value::T) where {T<:Integer,R<:Re
     value = UInt64(value)
     regid = Int(regid)
     uc_reg_write = Libdl.dlsym(LIBUNICORN, :uc_reg_write)
-    check(ccall(uc_reg_write, Err, (UcHandle, Int, Ref{UInt64}), handle, regid, Ref(value)))
+    check(ccall(
+        uc_reg_write,
+        UcError.t,
+        (UcHandle, Int, Ref{UInt64}),
+        handle,
+        regid,
+        Ref(value),
+    ))
 
 end
 
@@ -309,7 +340,7 @@ function mem_read(handle::UcHandle, address::UInt64, size::UInt64)::Vector{UInt8
     uc_mem_read = Libdl.dlsym(LIBUNICORN, :uc_mem_read)
     check(ccall(
         uc_mem_read,
-        Err,
+        UcError.t,
         (UcHandle, UInt64, Ptr{UInt8}, UInt64),
         handle,
         address,
@@ -328,15 +359,15 @@ end
 # to the bare UC handle, and not the Emulator wrapper struct.
 function uc_stop(handle::UcHandle)
     uc_emu_stop = Libdl.dlsym(LIBUNICORN, :uc_emu_stop)
-    check(ccall(uc_emu_stop, Err, (UcHandle,), handle))
+    check(ccall(uc_emu_stop, UcError.t, (UcHandle,), handle))
 end
 
 
 mutable struct MemRegion
     from::UInt64
     to::UInt64
-    perms::Perm
-    MemRegion() = new(0, 0, Perm(0))
+    perms::Perm.t
+    MemRegion() = new(0, 0, Perm.t(0))
 end
 
 function mem_regions(handle::UcHandle) #::Vector{MemRegion}
@@ -348,7 +379,7 @@ function mem_regions(handle::UcHandle) #::Vector{MemRegion}
     uc_mem_regions = Libdl.dlsym(LIBUNICORN, :uc_mem_regions)
     check(ccall(
         uc_mem_regions,
-        Err,
+        UcError.t,
         (UcHandle, Ref{Ptr{MemRegion}}, Ptr{UInt32}),
         handle,
         regions,
@@ -366,12 +397,12 @@ const HookHandle = Csize_t
 
 function hook_add(
     handle::UcHandle,
-    type::HookType,
+    type::HookType.t,
     callback,
     user_data,
     begin_addr::T,
     end_addr::T,
-   ) where {T<:Integer}
+) where {T<:Integer}
 
     # do we need to do anything with user data? is it good enough if the
     # callback is a closure?
@@ -381,9 +412,9 @@ function hook_add(
     c_callback =
         eval(:(@cfunction($callback, Nothing, (UcHandle, UInt64, UInt32, Ptr{Cvoid}))))
 
-    ccall(
+    check(ccall(
         uc_hook_add,
-        Err,
+        UcError.t,
         (UcHandle, Ref{Csize_t}, Cuint, Ptr{Cvoid}, Ptr{Cvoid}, UInt64, UInt64),
         handle,
         hook_handle,
@@ -392,7 +423,7 @@ function hook_add(
         user_data,
         begin_addr,
         end_addr,
-    )
+    ))
 
     (hook_handle[], user_data)
 end
