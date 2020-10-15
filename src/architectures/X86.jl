@@ -2,7 +2,7 @@ module X86
 
 module Register
 @enum t begin
-    INVALID_REGISTER = 0
+    INVALID = 0
     AH = 1
     AL = 2
     AX = 3
@@ -258,10 +258,10 @@ module Register
 end
 end
 
-module InstId
+module Instruction
 # X86 instructions
-@enum Instruction begin
-    INVALID_INSTRUCTION = 0
+@enum t begin
+    INVALID = 0
     AAA = 1
     AAD = 2
     AAM = 3

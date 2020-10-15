@@ -6,6 +6,7 @@ using Unicorn:
     Arch,
     Mode,
     Emulator,
+    UcHandle,
     Perm,
     reg_write,
     reg_read,
@@ -14,11 +15,12 @@ using Unicorn:
     emu_start,
     X86,
     mem_read,
-    mem_regions
+    mem_regions,
+    code_hook_add
 
 using Unicorn
 
-function test_eflags()
+function test_execution()
 
     # 0:    4d 31 f6                 xor    r14, r14
     # 3:    45 85 f6                 test   r14d, r14d
@@ -40,6 +42,16 @@ function test_eflags()
     code_read = mem_read(emu, address = UInt64(0x60_00b0), size = length(code))
     @test code_read == code
 
+    # Test code hooks
+    addrs = []
+    ran_the_callback = false
+    function callback(engine::UcHandle, addr::UInt64, size::UInt32)::Nothing
+        push!(addrs, addr)
+        ran_the_callback = true
+        return
+    end
+    code_hook_add(emu, callback = callback)
+
     emu_start(
         emu,
         begin_addr = UInt64(0x60_00b0 + 0x6),
@@ -48,8 +60,13 @@ function test_eflags()
     )
 
     result = reg_read(emu, X86.Register.RIP)
-    @test result == 0x6000b0 + 8
+    @test result == 0x60_00b0 + 8
+
+    # Check the data written to by the code hook callback
+    @test ran_the_callback
+    @test addrs == [0x60_00b6, 0x60_00b8]
 end
+
 
 function test_mem_regions()
 
@@ -74,6 +91,6 @@ function test_mem_regions()
 end
 
 @testset "Test x86_64 conditional execution" begin
-    test_eflags()
+    test_execution()
     test_mem_regions()
 end

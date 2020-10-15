@@ -105,21 +105,21 @@ end
 module HookType
 using BitFlags
 @bitflag t::Cuint begin
-    HOOK_INTR = 1
-    HOOK_INSN = 1 << 1
-    HOOK_CODE = 1 << 2
-    HOOK_BLOCK = 1 << 3
-    HOOK_MEM_READ_UNMAPPED = 1 << 4
-    HOOK_MEM_WRITE_UNMAPPED = 1 << 5
-    HOOK_MEM_FETCH_UNMAPPED = 1 << 6
-    HOOK_MEM_READ_PROT = 1 << 7
-    HOOK_MEM_WRITE_PROT = 1 << 8
-    HOOK_MEM_FETCH_PROT = 1 << 9
-    HOOK_MEM_READ = 1 << 10
-    HOOK_MEM_WRITE = 1 << 11
-    HOOK_MEM_FETCH = 1 << 12
-    HOOK_MEM_READ_AFTER = 1 << 13
-    HOOK_INSN_INVALID = 1 << 14
+    INTR = 1
+    INSN = 1 << 1
+    CODE = 1 << 2
+    BLOCK = 1 << 3
+    MEM_READ_UNMAPPED = 1 << 4
+    MEM_WRITE_UNMAPPED = 1 << 5
+    MEM_FETCH_UNMAPPED = 1 << 6
+    MEM_READ_PROT = 1 << 7
+    MEM_WRITE_PROT = 1 << 8
+    MEM_FETCH_PROT = 1 << 9
+    MEM_READ = 1 << 10
+    MEM_WRITE = 1 << 11
+    MEM_FETCH = 1 << 12
+    MEM_READ_AFTER = 1 << 13
+    INSN_INVALID = 1 << 14
 end
 end
 
@@ -142,6 +142,7 @@ mutable struct Emulator
     arch::Arch.t
     mode::Mode.t
     handle::UcHandle
+    hooks::Vector{Csize_t}
 
     # Constructor
     Emulator(arch::Arch.t, mode::Mode.t) = begin
@@ -149,7 +150,7 @@ mutable struct Emulator
 
         uc_open = Libdl.dlsym(LIBUNICORN, :uc_open)
         check(ccall(uc_open, UcError.t, (UInt, UInt, Ref{UcHandle}), arch, mode, uc))
-        emu = new(arch, mode, uc[])
+        emu = new(arch, mode, uc[], [])
         finalizer(e -> uc_free(e.handle), emu)
         return emu
     end
@@ -161,21 +162,19 @@ function check(result::UcError.t)
     end
 end
 
-# Map memory in for emulation.
-# This API adds a memory region that can be used by emulation.
-#
-# @uc: handle returned by uc_open()
-# @address: starting address of the new memory region to be mapped in.
-#    This address must be aligned to 4KB, or this will return with UC_ERR_ARG error.
-# @size: size of the new memory region to be mapped in.
-#    This size must be multiple of 4KB, or this will return with UC_ERR_ARG error.
-# @perms: Permissions for the newly mapped region.
-#    This must be some combination of UC_PROT_READ | UC_PROT_WRITE | UC_PROT_EXEC,
-#    or this will return with UC_ERR_ARG error.
-#
-# @return UC_ERR_OK on success, or other value on failure (refer to uc_err enum
-#   for detailed error).
-#
+"""
+Map memory in for emulation.
+This API adds a memory region that can be used by emulation.
+
+- uc: handle returned by uc_open()
+- address: starting address of the new memory region to be mapped in.
+   This address must be aligned to 4KB, or this will return with UC_ERR_ARG error.
+- size: size of the new memory region to be mapped in.
+   This size must be multiple of 4KB, or this will return with UC_ERR_ARG error.
+- perms: Permissions for the newly mapped region.
+   This must be some combination of UC_PROT_READ | UC_PROT_WRITE | UC_PROT_EXEC,
+   or this will return with UC_ERR_ARG error.
+"""
 function mem_map(
     handle::UcHandle;
     address::UInt64 = 0x0000_0000_0000_0000,
@@ -198,18 +197,19 @@ function mem_map(emu::Emulator; address = 0, size = 4096, perms::Perm.t = Perm.A
     mem_map(emu.handle, address = UInt64(address), size = UInt64(size), perms = perms)
 end
 
-# Emulate machine code in a specific duration of time.
-#
-# @emu: handle returned by uc_open()
-# @begin_addr: address where emulation starts
-# @until_addr: address where emulation stops (i.e when this address is hit)
-# @μs_timeout: duration to emulate the code (in microseconds). When this value is 0,
-#        we will emulate the code in infinite time, until the code is finished.
-# @inst_count: the number of instructions to be emulated. When this value is 0,
-#        we will emulate all the code available, until the code is finished.
-#
-# @return UC_ERR_OK on success, or other value on failure (refer to uc_err enum
-#   for detailed error).
+"""
+Emulate machine code in a specific duration of time.
+- emu: handle returned by uc_open()
+- begin_addr: address where emulation starts
+- until_addr: address where emulation stops (i.e when this address is hit)
+- μs_timeout: duration to emulate the code (in microseconds). When this value is 0,
+       we will emulate the code in infinite time, until the code is finished.
+- inst_count: the number of instructions to be emulated. When this value is 0,
+       we will emulate all the code available, until the code is finished.
+
+- return UC_ERR_OK on success, or other value on failure (refer to uc_err enum
+  for detailed error).
+"""
 function emu_start(
     emu::Emulator,
     begin_addr::UInt64,
@@ -233,11 +233,11 @@ end
 
 function emu_start(
     emu::Emulator;
-    begin_addr = 0,
-    until_addr = 0,
-    μs_timeout = 0,
-    inst_count = 0,
-)::UcError.t
+    begin_addr::M = 0,
+    until_addr::N = 0,
+    μs_timeout::O = 0,
+    inst_count::P = 0,
+)::UcError.t where {M<:Integer,N<:Integer,O<:Integer,P<:Integer}
     emu_start(
         emu,
         UInt64(begin_addr),
@@ -396,22 +396,18 @@ end
 const HookHandle = Csize_t
 
 function hook_add(
-    handle::UcHandle,
+    handle::UcHandle;
     type::HookType.t,
-    callback,
-    user_data,
-    begin_addr::T,
-    end_addr::T,
-) where {T<:Integer}
+    begin_addr::N,
+    until_addr::M,
+    c_callback::Ptr{Cvoid},
+    user_data = Ref{Ptr{Cvoid}}()[],
+) where {M<:Integer,N<:Integer}
 
     # do we need to do anything with user data? is it good enough if the
     # callback is a closure?
     uc_hook_add = Libdl.dlsym(LIBUNICORN, :uc_hook_add)
     hook_handle = Ref{Csize_t}(0)
-
-    c_callback =
-        eval(:(@cfunction($callback, Nothing, (UcHandle, UInt64, UInt32, Ptr{Cvoid}))))
-
     check(ccall(
         uc_hook_add,
         UcError.t,
@@ -422,16 +418,231 @@ function hook_add(
         c_callback,
         user_data,
         begin_addr,
-        end_addr,
+        until_addr,
     ))
 
-    (hook_handle[], user_data)
+    hook_handle[]
 end
 
-# TODO:
-# - uc_mem_regions
-# - hooks!
-# - maybe batch read/write
+"""
+Code hook callbacks must be void functions with three parameters:
+- the unicorn engine handle, of type `UcHandle`
+- the address, of type `Culonglong` (`UInt64`)
+- the size of the current instruction or block, of type `Cuint` (`UInt32`)
+"""
+function code_hook_add(
+    emu::Emulator;
+    type::HookType.t = HookType.CODE,
+    begin_addr::N = 1,
+    until_addr::M = 0,
+    callback, # Must have the signature $CODE_HOOK_SIGNATURE
+)::Csize_t where {M<:Integer,N<:Integer}
 
-# End of Module
+    @assert type == HookType.CODE || type == HookType.BLOCK "Invalid hook type."
+
+    c_callback = eval(:(@cfunction($callback, Cvoid, (UcHandle, Culonglong, Cuint))))
+
+    hh = hook_add(
+        emu.handle,
+        type = type,
+        begin_addr = begin_addr,
+        until_addr = until_addr,
+        c_callback = c_callback,
+    )
+
+    push!(emu.hooks, hh)
+    
+    hh
+end
+
+"""
+Interrupt hook callbacks should take two parameters:
+- an engine handle, of type `UcHandle`, and
+- the interrupt number, of type `Cuint` (`UInt32`)
+"""
+function interrupt_hook_add(
+    emu::Emulator;
+    begin_addr::M = 1,
+    until_addr::N = 0,
+    callback,
+)::Csize_t where {M<:Integer,N<:Integer}
+
+    c_callback = eval(:(@cfunction($callback, Cvoid, (UcHandle, Cuint))))
+
+    hh = hook_add(
+        emu.handle,
+        type = HookType.INTR,
+        begin_addr = begin_addr,
+        until_addr = until_addr,
+        c_callback = c_callback,
+    )
+
+    push!(emu.hooks, hh)
+
+    hh
+
+end
+
+"""
+Callbacks for invalid instruction hooks take one parameter,
+the handle of the unicorn engine (`UcHandle`), and return
+a `Bool`: `true` to continue execution, or `false` to stop
+the program with an invalid instruction error.
+"""
+function invalid_inst_hook_add(
+    emu::Emulator;
+    begin_addr::M = 1,
+    until_addr::N = 0,
+    callback,
+)::Csize_t where {M<:Integer,N<:Integer}
+
+    c_callback = eval(:(@cfunction($callback, Bool, (UcHandle,))))
+
+    hh = hook_add(
+        emu.handle,
+        type = HookType.INSN_INVALID,
+        begin_addr = begin_addr,
+        until_addr = until_addr,
+        c_callback = c_callback,
+    )
+    
+    push!(emu.hooks, hh)
+
+    hh
+end
+
+# TODO: Find out if other instruction code callbacks are supported
+"""
+Callback functions for tracing `IN` or `OUT` instructions of the X86 take
+four parameters:
+- a handle to the unicorn emulator engine, of type `UcHandle`
+- a port number, of type `Cuint` (`UInt32`)
+- a data size (1/2/4) to be written to this port
+- a data value, of type `Cuint`, to be written to this port
+"""
+function instruction_hook_add(
+    emu::Emulator;
+    begin_addr::M = 1,
+    until_addr::N = 0,
+    instruction_id::X86.Instruction.t,
+)::Csize_t where {M<:Integer,N<:Integer}
+
+    c_callback = eval(:(@cfunction($callback, Cvoid, (UcHandle, Cuint, Cint, Cuint))))
+
+    hook_add(
+        emu.handle,
+        type = HookType.INSN,
+        begin_addr = begin_addr,
+        until_addr = until_addr,
+        instruction_id = instruction_id,
+    )
+
+    uc_hook_add = Libdl.dlsym(LIBUNICORN, :uc_hook_add)
+    hook_handle = Ref{Csize_t}(0)
+
+    user_data = Ref{Ptr{Cvoid}}()[]
+
+    check(ccall(
+        uc_hook_add,
+        UcError.t,
+        (UcHandle, Ref{Csize_t}, Cuint, Ptr{Cvoid}, Ptr{Cvoid}, UInt64, UInt64, Cuint),
+        handle,
+        hook_handle,
+        HookType.INSN,
+        c_callback,
+        user_data,
+        begin_addr,
+        until_addr,
+        instruction_id,
+    ))
+
+    push!(emu.hooks, hook_handle[])
+
+    hook_handle[]
+end
+
+module MemoryAccess
+@enum t begin
+    READ = 16
+    WRITE
+    FETCH
+    READ_UNMAPPED
+    WRITE_UNMAPPED
+    FETCH_UNMAPPED
+    WRITE_PROT
+    READ_PROT
+    FETCH_PROT
+    READ_AFTER
+end
+end
+
+"""
+Callback functions for hooking memory (READ, WRITE, & FETCH)
+should take five parameters. Note that FETCH hooks don't 
+appear to be currently supported by Unicorn (and this oversight
+appears to be undocumented).
+
+- handle of the unicorn emulator, `UcHandle`
+- type of memory action (`MemoryAccess.t`)
+- address of the code being executed, `UInt64`
+- size of data being read from or written to memory, `Cint`
+- value of data being written to memory, `Int64`
+
+These callbacks should return `true`, unless the type of memory access
+being hooked are invalid accesses, in which case a `false` can be 
+returned by the callback to stop execution.
+"""
+function mem_hook_add(
+    emu::Emulator,
+    begin_addr::M = 1,
+    until_addr::N = 0,
+    access_type::HookType.t = HookType.MEM_READ,
+)::Csize_t where {M<:Integer,N<:Integer}
+
+    c_callback =
+        eval(:(@cfunction($callback, Bool, (UcHandle, Cuint, UInt64, Cint, Int64))))
+
+    hh = hook_add(
+        emu.handle,
+        type = access_type,
+        begin_addr = begin_addr,
+        until_addr = until_addr,
+    )
+
+    push!(emu.hooks, hh)
+
+    hh
+
+end
+
+function hook_del(uc_handle::UcHandle, hook_handle::Csize_t)
+
+    uc_hook_del = Libdl.dlsym(LIBUNICORN, :uc_hook_del)
+    
+    check(ccall(
+        uc_hook_del,
+        UcError.t,
+        (UcHandle, Csize_t),
+        uc_handle, hook_handle))
+
+end
+
+function hook_del(emu::Emulator, hook_handle::Csize_t)
+
+    hook_del(emu.handle, hook_handle)
+    filter!(h -> h != hook_handle, emu.hooks)
+
+end
+
+function delete_all_hooks(emu::Emulator)
+
+    while length(emu.hooks) > 0
+        hook_del(emu.handle, pop!(emu.hooks))
+    end
+
+end
+
+
+
+### End of module
 end
