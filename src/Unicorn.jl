@@ -1,14 +1,28 @@
 module Unicorn
 
-# FIXME hack
 __precompile__(false)
 import Libdl
+using unicorn_jll
 
+LIBUNICORN = unicorn_jll.libunicorn_handle
 
-LIBUNICORN_PATH =
-    "LIBUNICORN_PATH" in keys(ENV) ? ENV["LIBUNICORN_PATH"] : "../unicorn/libunicorn.so"
-LIBUNICORN = Libdl.dlopen(LIBUNICORN_PATH)
+function load_unicorn_library()
+    global LIBUNICORN
+    libunicorn_path = nothing
+    if "LIBUNICORN_PATH" in keys(ENV)
+        libunicorn_path = ENV["LIBUNICORN_PATH"]
+    else
+        libunicorn_path = Libdl.find_library("libunicorn.so", ["../unicorn/"])
+    end
+    try
+        LIBUNICORN = Libdl.dlopen(libunicorn_path)
+    catch e
+        @error "Could not find and load libunicorn.so. Try compiling unicorn submodule."
+        throw(e)
+    end
+end
 
+#load_unicorn_library()
 
 export ARM,
     ARM64,
@@ -33,7 +47,7 @@ export ARM,
     reg_read,
     reg_write,
     uc_stop,
-    uc_version
+    unicorn_version
 
 
 include("./architectures/ARM.jl")
@@ -688,14 +702,15 @@ function delete_all_hooks(emu::Emulator)
 
 end
 
+"""
+Returns the current version number of the Unicorn C library.
+"""
 function unicorn_version()
-
     uc_version = Libdl.dlsym(LIBUNICORN, :uc_version)
     val = ccall(uc_version, UInt32, (Ptr{Cuint}, Ptr{Cuint}), Ptr{Cuint}(0), Ptr{Cuint}(0))
     minor = val & 0x0F
     major = (val >> 8) & 0x0F
-    return Int(major), Int(minor)
-
+    return VersionNumber(major, minor)
 end
 
 function quick()

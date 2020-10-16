@@ -1,7 +1,5 @@
 using Test
 
-println("hello")
-
 using Unicorn:
     Arch,
     Mode,
