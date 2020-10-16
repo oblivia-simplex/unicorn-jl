@@ -131,11 +131,12 @@ LIBUNICORN = Libdl.dlopen(UC_PATH)
 
 const UcHandle = Ptr{Cvoid}
 
-function uc_free(uc::UcHandle)
-    println("Freeing unicorn emulator at $(uc)...")
+function uc_close(uc::UcHandle)
+    println("Closing and freeing unicorn emulator at $(uc)...")
     uc_close = Libdl.dlsym(LIBUNICORN, :uc_close)
     ccall(uc_close, Nothing, (UcHandle,), uc)
 end
+
 
 # The unicorn emulator object
 mutable struct Emulator
@@ -151,7 +152,7 @@ mutable struct Emulator
         uc_open = Libdl.dlsym(LIBUNICORN, :uc_open)
         check(ccall(uc_open, UcError.t, (UInt, UInt, Ref{UcHandle}), arch, mode, uc))
         emu = new(arch, mode, uc[], [])
-        finalizer(e -> uc_free(e.handle), emu)
+        finalizer(e -> uc_close(e.handle), emu)
         return emu
     end
 end
@@ -263,8 +264,8 @@ function mem_write(handle::UcHandle; address::UInt64, bytes::Vector{UInt8})::UIn
     size
 end
 
-function mem_write(emu::Emulator; address::UInt64, bytes::Vector{UInt8})::UInt
-    mem_write(emu.handle, address = address, bytes = bytes)
+function mem_write(emu::Emulator; address::N, bytes::Vector{UInt8})::UInt where {N<:Integer}
+    mem_write(emu.handle, address = UInt64(address), bytes = bytes)
 end
 
 function reg_read(handle::UcHandle, regid::Int)::UInt64
@@ -351,7 +352,11 @@ function mem_read(handle::UcHandle, address::UInt64, size::UInt64)::Vector{UInt8
     bytes
 end
 
-function mem_read(emu::Emulator; address = 0, size = 0)::Vector{UInt8}
+function mem_read(
+    emu::Emulator;
+    address::M = 0,
+    size::N = 0,
+)::Vector{UInt8} where {M<:Integer,N<:Integer}
     mem_read(emu.handle, UInt64(address), UInt64(size))
 end
 
@@ -454,7 +459,7 @@ function code_hook_add(
     )
 
     push!(emu.hooks, hh)
-    
+
     hh
 end
 
@@ -508,7 +513,7 @@ function invalid_inst_hook_add(
         until_addr = until_addr,
         c_callback = c_callback,
     )
-    
+
     push!(emu.hooks, hh)
 
     hh
@@ -522,23 +527,20 @@ four parameters:
 - a port number, of type `Cuint` (`UInt32`)
 - a data size (1/2/4) to be written to this port
 - a data value, of type `Cuint`, to be written to this port
+
+Currently, the only instructions supported are `IN` and `OUT`. 
+Attempts to use other instruction codes will result in Unicorn
+returning an error code, which will throw `UcException(HOOK::t = 9)`.
 """
-function instruction_hook_add(
+function x86_instruction_hook_add(
     emu::Emulator;
     begin_addr::M = 1,
     until_addr::N = 0,
     instruction_id::X86.Instruction.t,
+    callback,
 )::Csize_t where {M<:Integer,N<:Integer}
 
     c_callback = eval(:(@cfunction($callback, Cvoid, (UcHandle, Cuint, Cint, Cuint))))
-
-    hook_add(
-        emu.handle,
-        type = HookType.INSN,
-        begin_addr = begin_addr,
-        until_addr = until_addr,
-        instruction_id = instruction_id,
-    )
 
     uc_hook_add = Libdl.dlsym(LIBUNICORN, :uc_hook_add)
     hook_handle = Ref{Csize_t}(0)
@@ -549,7 +551,7 @@ function instruction_hook_add(
         uc_hook_add,
         UcError.t,
         (UcHandle, Ref{Csize_t}, Cuint, Ptr{Cvoid}, Ptr{Cvoid}, UInt64, UInt64, Cuint),
-        handle,
+        emu.handle,
         hook_handle,
         HookType.INSN,
         c_callback,
@@ -596,20 +598,33 @@ being hooked are invalid accesses, in which case a `false` can be
 returned by the callback to stop execution.
 """
 function mem_hook_add(
-    emu::Emulator,
+    emu::Emulator;
     begin_addr::M = 1,
     until_addr::N = 0,
     access_type::HookType.t = HookType.MEM_READ,
+    callback,
 )::Csize_t where {M<:Integer,N<:Integer}
 
+    ret_type = Cvoid
+
+    if access_type in [HookType.MEM_FETCH_PROT, 
+                    HookType.MEM_FETCH_UNMAPPED,
+                    HookType.MEM_READ_PROT,
+                    HookType.MEM_READ_UNMAPPED,
+                    HookType.MEM_WRITE_PROT,
+                    HookType.MEM_WRITE_UNMAPPED]
+        ret_type = Bool
+    end
+
     c_callback =
-        eval(:(@cfunction($callback, Bool, (UcHandle, Cuint, UInt64, Cint, Int64))))
+        eval(:(@cfunction($callback, $ret_type, (UcHandle, Cuint, UInt64, Cint, Int64))))
 
     hh = hook_add(
         emu.handle,
         type = access_type,
         begin_addr = begin_addr,
         until_addr = until_addr,
+        c_callback = c_callback,
     )
 
     push!(emu.hooks, hh)
@@ -621,12 +636,8 @@ end
 function hook_del(uc_handle::UcHandle, hook_handle::Csize_t)
 
     uc_hook_del = Libdl.dlsym(LIBUNICORN, :uc_hook_del)
-    
-    check(ccall(
-        uc_hook_del,
-        UcError.t,
-        (UcHandle, Csize_t),
-        uc_handle, hook_handle))
+
+    check(ccall(uc_hook_del, UcError.t, (UcHandle, Csize_t), uc_handle, hook_handle))
 
 end
 
@@ -648,15 +659,21 @@ function delete_all_hooks(emu::Emulator)
 end
 
 function unicorn_version()
-    
+
     uc_version = Libdl.dlsym(LIBUNICORN, :uc_version)
-    val = ccall(uc_version, UInt32, (Ptr{Cuint},Ptr{Cuint}), Ptr{Cuint}(0), Ptr{Cuint}(0))
+    val = ccall(uc_version, UInt32, (Ptr{Cuint}, Ptr{Cuint}), Ptr{Cuint}(0), Ptr{Cuint}(0))
     minor = val & 0x0F
     major = (val >> 8) & 0x0F
     return Int(major), Int(minor)
 
 end
 
+function quick()
+    emu = Emulator(Arch.X86, Mode.MODE_64)
+    mem_map(emu)
+    mem_write(emu, address = 0, bytes = rand(UInt8, 0x1000))
+    return emu
+end
 
 ### End of module
 end
