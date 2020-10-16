@@ -1,5 +1,7 @@
 module Unicorn
 
+__precompile__(false)
+
 export ARM,
     ARM64,
     Arch,

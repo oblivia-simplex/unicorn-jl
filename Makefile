@@ -1,0 +1,3 @@
+
+unicorn:
+	cd unicorn && make
