@@ -1,9 +1,31 @@
 module Unicorn
 
+export ARM,
+    ARM64,
+    Arch,
+    Emulator,
+    HookType,
+    M68K,
+    MIPS,
+    Mode,
+    Perm,
+    SPARC,
+    UcException,
+    UcHandle,
+    X86,
+    code_hook_add,
+    emu_start,
+    interrupt_hook_add,
+    mem_hook_add,
+    mem_map,
+    mem_regions,
+    mem_write,
+    reg_read,
+    reg_write,
+    uc_stop,
+    uc_version
+
 import Libdl
-
-__precompile__(false)
-
 
 include("./architectures/ARM.jl")
 include("./architectures/ARM64.jl")
@@ -132,7 +154,7 @@ LIBUNICORN = Libdl.dlopen(UC_PATH)
 const UcHandle = Ptr{Cvoid}
 
 function uc_close(uc::UcHandle)
-    println("Closing and freeing unicorn emulator at $(uc)...")
+    @async println("Closing and freeing unicorn emulator at $(uc)...")
     uc_close = Libdl.dlsym(LIBUNICORN, :uc_close)
     ccall(uc_close, Nothing, (UcHandle,), uc)
 end
@@ -443,7 +465,7 @@ function code_hook_add(
     type::HookType.t = HookType.CODE,
     begin_addr::N = 1,
     until_addr::M = 0,
-    callback, # Must have the signature $CODE_HOOK_SIGNATURE
+    callback::Function, # Must have the signature $CODE_HOOK_SIGNATURE
 )::Csize_t where {M<:Integer,N<:Integer}
 
     @assert type == HookType.CODE || type == HookType.BLOCK "Invalid hook type."
@@ -472,7 +494,7 @@ function interrupt_hook_add(
     emu::Emulator;
     begin_addr::M = 1,
     until_addr::N = 0,
-    callback,
+    callback::Function,
 )::Csize_t where {M<:Integer,N<:Integer}
 
     c_callback = eval(:(@cfunction($callback, Cvoid, (UcHandle, Cuint))))
@@ -501,7 +523,7 @@ function invalid_inst_hook_add(
     emu::Emulator;
     begin_addr::M = 1,
     until_addr::N = 0,
-    callback,
+    callback::Function,
 )::Csize_t where {M<:Integer,N<:Integer}
 
     c_callback = eval(:(@cfunction($callback, Bool, (UcHandle,))))
@@ -537,7 +559,7 @@ function x86_instruction_hook_add(
     begin_addr::M = 1,
     until_addr::N = 0,
     instruction_id::X86.Instruction.t,
-    callback,
+    callback::Function,
 )::Csize_t where {M<:Integer,N<:Integer}
 
     c_callback = eval(:(@cfunction($callback, Cvoid, (UcHandle, Cuint, Cint, Cuint))))
@@ -602,17 +624,19 @@ function mem_hook_add(
     begin_addr::M = 1,
     until_addr::N = 0,
     access_type::HookType.t = HookType.MEM_READ,
-    callback,
+    callback::Function,
 )::Csize_t where {M<:Integer,N<:Integer}
 
     ret_type = Cvoid
 
-    if access_type in [HookType.MEM_FETCH_PROT, 
-                    HookType.MEM_FETCH_UNMAPPED,
-                    HookType.MEM_READ_PROT,
-                    HookType.MEM_READ_UNMAPPED,
-                    HookType.MEM_WRITE_PROT,
-                    HookType.MEM_WRITE_UNMAPPED]
+    if access_type in [
+        HookType.MEM_FETCH_PROT,
+        HookType.MEM_FETCH_UNMAPPED,
+        HookType.MEM_READ_PROT,
+        HookType.MEM_READ_UNMAPPED,
+        HookType.MEM_WRITE_PROT,
+        HookType.MEM_WRITE_UNMAPPED,
+    ]
         ret_type = Bool
     end
 
