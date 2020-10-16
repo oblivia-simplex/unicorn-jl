@@ -16,6 +16,12 @@ $ cd unicorn-dl/unicorn
 $ make
 ```
 
+If you already have the Unicorn library installed, you may skip this step, and 
+instead
+```
+$ export LIBUNICORN_PATH=<path to libunicorn.so>
+```
+
 After `unicorn/libunicorn.so` is built, the Unicorn-jl bindings can be used.
 
 This is a work in progress, and still a bit rough around the edges.

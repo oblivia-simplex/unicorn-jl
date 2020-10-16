@@ -1,6 +1,14 @@
 module Unicorn
 
+# FIXME hack
 __precompile__(false)
+import Libdl
+
+
+LIBUNICORN_PATH =
+    "LIBUNICORN_PATH" in keys(ENV) ? ENV["LIBUNICORN_PATH"] : "../unicorn/libunicorn.so"
+LIBUNICORN = Libdl.dlopen(LIBUNICORN_PATH)
+
 
 export ARM,
     ARM64,
@@ -27,7 +35,6 @@ export ARM,
     uc_stop,
     uc_version
 
-import Libdl
 
 include("./architectures/ARM.jl")
 include("./architectures/ARM64.jl")
@@ -148,9 +155,6 @@ end
 end
 
 
-# FIXME hack
-UC_PATH = "/home/lucca/src/unicorn/libunicorn.so"
-LIBUNICORN = Libdl.dlopen(UC_PATH)
 
 
 const UcHandle = Ptr{Cvoid}
