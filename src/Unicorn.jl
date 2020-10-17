@@ -195,6 +195,7 @@ mutable struct Emulator
     mode::Mode.t
     handle::Ref{UcHandle}
     hooks::Vector{Csize_t}
+    array_backed_memory::Dict{UInt64,Array}
 
     # Constructor
     Emulator(arch::Arch.t, mode::Mode.t) = begin
@@ -202,7 +203,7 @@ mutable struct Emulator
 
         uc_open = Libdl.dlsym(LIBUNICORN, :uc_open)
         check(ccall(uc_open, UcError.t, (UInt, UInt, Ref{UcHandle}), arch, mode, uc))
-        emu = new(arch, mode, uc, [])
+        emu = new(arch, mode, uc, [], Dict())
         finalizer(e -> uc_close(e.handle[]), emu)
         return emu
     end
@@ -265,6 +266,33 @@ end
 
 function mem_map(emu::Emulator; address = 0, size = 4096, perms::Perm.t = Perm.ALL)
     mem_map(emu.handle[], address = UInt64(address), size = UInt64(size), perms = perms)
+end
+
+"""
+Map an existing array into memory. Be careful with this, and make sure that the garbage collector doesn't drop it.
+"""
+function mem_map_array(handle::UcHandle; address::N = 0, size::M = 0, perms::Perm.t = Perm.ALL, array = Array) where {M<:Integer, N<:Integer}
+    uc_mem_map_ptr = Libdl.dlsym(LIBUNICORN, :uc_mem_map_ptr)
+    check(ccall(
+        uc_mem_map_ptr,
+        UcError.t,
+        (UcHandle, UInt64, UInt, UInt32, Ptr{Cvoid}),
+        handle,
+        address,
+        size,
+        perms,
+        pointer(array)))
+end
+
+"""
+Map an existing array to memory. This will let the caller manipulate and access
+the emulator's memory directly. A reference to the backing array is maintained 
+in the `Emulator` struct, to prevent premature garbage collection.
+"""
+function mem_map_array(emu::Emulator; address::N = 0, size::M = 0, perms::Perm.t = Perm.ALL, array = Array) where {M<:Integer, N<:Integer}
+    @assert length(array) >= size
+    mem_map_array(emu.handle[], address = address, size = size, perms = perms, array = array)
+    emu.array_backed_memory[UInt64(address)] = array # To protect from the GC
 end
 
 """
