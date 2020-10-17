@@ -1,28 +1,18 @@
 module Unicorn
 
-__precompile__(false)
-import Libdl
+# TODO: https://discourse.julialang.org/t/avoid-gc-freeing-ptr-nothing/38664/8
+# I think GC is occasionally cleaning up some of my C-allocated void pointers.
+
+using Libdl
 using unicorn_jll
 
-LIBUNICORN = unicorn_jll.libunicorn_handle
+__precompile__()
 
-function load_unicorn_library()
+LIBUNICORN = nothing
+function __init__()
     global LIBUNICORN
-    libunicorn_path = nothing
-    if "LIBUNICORN_PATH" in keys(ENV)
-        libunicorn_path = ENV["LIBUNICORN_PATH"]
-    else
-        libunicorn_path = Libdl.find_library("libunicorn.so", ["../unicorn/"])
-    end
-    try
-        LIBUNICORN = Libdl.dlopen(libunicorn_path)
-    catch e
-        @error "Could not find and load libunicorn.so. Try compiling unicorn submodule."
-        throw(e)
-    end
+    LIBUNICORN = unicorn_jll.libunicorn_handle
 end
-
-#load_unicorn_library()
 
 export ARM,
     ARM64,
@@ -174,7 +164,7 @@ end
 const UcHandle = Ptr{Cvoid}
 
 function uc_close(uc::UcHandle)
-    @async println("Closing and freeing unicorn emulator at $(uc)...")
+    #@async println("Closing and freeing unicorn emulator at $(uc)...")
     uc_close = Libdl.dlsym(LIBUNICORN, :uc_close)
     ccall(uc_close, Nothing, (UcHandle,), uc)
 end
@@ -184,7 +174,7 @@ end
 mutable struct Emulator
     arch::Arch.t
     mode::Mode.t
-    handle::UcHandle
+    handle::Ref{UcHandle}
     hooks::Vector{Csize_t}
 
     # Constructor
@@ -193,8 +183,8 @@ mutable struct Emulator
 
         uc_open = Libdl.dlsym(LIBUNICORN, :uc_open)
         check(ccall(uc_open, UcError.t, (UInt, UInt, Ref{UcHandle}), arch, mode, uc))
-        emu = new(arch, mode, uc[], [])
-        finalizer(e -> uc_close(e.handle), emu)
+        emu = new(arch, mode, uc, [])
+        finalizer(e -> uc_close(e.handle[]), emu)
         return emu
     end
 end
@@ -237,7 +227,7 @@ function mem_map(
 end
 
 function mem_map(emu::Emulator; address = 0, size = 4096, perms::Perm.t = Perm.ALL)
-    mem_map(emu.handle, address = UInt64(address), size = UInt64(size), perms = perms)
+    mem_map(emu.handle[], address = UInt64(address), size = UInt64(size), perms = perms)
 end
 
 """
@@ -265,7 +255,7 @@ function emu_start(
         uc_emu_start,
         UcError.t,
         (UcHandle, UInt64, UInt64, UInt64, UInt),
-        emu.handle,
+        emu.handle[],
         begin_addr,
         until_addr,
         μs_timeout,
@@ -290,7 +280,7 @@ function emu_start(
     )
 end
 
-function mem_write(handle::UcHandle; address::UInt64, bytes::Vector{UInt8})::UInt
+function mem_write(handle::UcHandle; address::UInt64, bytes::Vector{UInt8})
     size = length(bytes)
     ptr = pointer(bytes)
     uc_mem_write = Libdl.dlsym(LIBUNICORN, :uc_mem_write)
@@ -303,12 +293,19 @@ function mem_write(handle::UcHandle; address::UInt64, bytes::Vector{UInt8})::UIn
         ptr,
         size,
     ))
-    size
 end
 
-function mem_write(emu::Emulator; address::N, bytes::Vector{UInt8})::UInt where {N<:Integer}
-    mem_write(emu.handle, address = UInt64(address), bytes = bytes)
+"""
+Write an array of bytes to the emulator's memory. Note that the memory range
+written to must be mapped, beforehand, using the `mem_map()` method.
+
+This method will throw a `UcException` if an attempt is made to write to
+unmapped memory. 
+"""
+function mem_write(emu::Emulator; address::N, bytes::Vector{UInt8}) where {N<:Integer}
+    mem_write(emu.handle[], address = UInt64(address), bytes = bytes)
 end
+
 
 function reg_read(handle::UcHandle, regid::Int)::UInt64
 
@@ -326,8 +323,14 @@ function reg_read(handle::UcHandle, regid::R)::UInt64 where {R<:Register}
     reg_read(handle, Int(regid))
 end
 
+"""
+Read an emulator register. The caller is responsible for ensuring that the
+appropriate architecture's register identifiers are used.
+
+This method may throw a `UcException` if something goes wrong.
+"""
 function reg_read(emu::Emulator, regid::R)::UInt64 where {R<:Register}
-    reg_read(emu.handle, regid)
+    reg_read(emu.handle[], regid)
 end
 
 # FIXME: this doesn't work yet
@@ -352,11 +355,10 @@ end
 # end
 # 
 # function reg_read_batch(emu::Emulator, regids::Vector{R}) where { R <: Register }
-#     reg_read_batch(emu.handle, [Int(r) for r in regids])
+#     reg_read_batch(emu.handle[], [Int(r) for r in regids])
 # end
-# 
-function reg_write(handle::UcHandle, regid::R, value::T) where {T<:Integer,R<:Register}
 
+function reg_write(handle::UcHandle, regid::R, value::T) where {T<:Integer,R<:Register}
     value = UInt64(value)
     regid = Int(regid)
     uc_reg_write = Libdl.dlsym(LIBUNICORN, :uc_reg_write)
@@ -368,11 +370,13 @@ function reg_write(handle::UcHandle, regid::R, value::T) where {T<:Integer,R<:Re
         regid,
         Ref(value),
     ))
-
 end
 
-function reg_write(emu::Emulator, regid::R, value::T) where {T<:Integer,R<:Register}
-    reg_write(emu.handle, regid, value)
+"""
+Write a value to an emulator register. May throw a `UcException` if misused.
+"""
+function reg_write(emu::Emulator; register::R, value::T) where {T<:Integer,R<:Register}
+    reg_write(emu.handle[], register, value)
 end
 
 
@@ -394,12 +398,15 @@ function mem_read(handle::UcHandle, address::UInt64, size::UInt64)::Vector{UInt8
     bytes
 end
 
+"""
+Read `size` bytes from `address` in emulator memory.
+"""
 function mem_read(
     emu::Emulator;
     address::M = 0,
     size::N = 0,
 )::Vector{UInt8} where {M<:Integer,N<:Integer}
-    mem_read(emu.handle, UInt64(address), UInt64(size))
+    mem_read(emu.handle[], UInt64(address), UInt64(size))
 end
 
 # This method is primarily to be used in hooks, where we have access only
@@ -440,7 +447,7 @@ function mem_regions(handle::UcHandle) #::Vector{MemRegion}
 end
 
 function mem_regions(emu::Emulator)
-    mem_regions(emu.handle)
+    mem_regions(emu.handle[])
 end
 
 const HookHandle = Csize_t
@@ -493,7 +500,7 @@ function code_hook_add(
     c_callback = eval(:(@cfunction($callback, Cvoid, (UcHandle, Culonglong, Cuint))))
 
     hh = hook_add(
-        emu.handle,
+        emu.handle[],
         type = type,
         begin_addr = begin_addr,
         until_addr = until_addr,
@@ -520,7 +527,7 @@ function interrupt_hook_add(
     c_callback = eval(:(@cfunction($callback, Cvoid, (UcHandle, Cuint))))
 
     hh = hook_add(
-        emu.handle,
+        emu.handle[],
         type = HookType.INTR,
         begin_addr = begin_addr,
         until_addr = until_addr,
@@ -549,7 +556,7 @@ function invalid_inst_hook_add(
     c_callback = eval(:(@cfunction($callback, Bool, (UcHandle,))))
 
     hh = hook_add(
-        emu.handle,
+        emu.handle[],
         type = HookType.INSN_INVALID,
         begin_addr = begin_addr,
         until_addr = until_addr,
@@ -593,7 +600,7 @@ function x86_instruction_hook_add(
         uc_hook_add,
         UcError.t,
         (UcHandle, Ref{Csize_t}, Cuint, Ptr{Cvoid}, Ptr{Cvoid}, UInt64, UInt64, Cuint),
-        emu.handle,
+        emu.handle[],
         hook_handle,
         HookType.INSN,
         c_callback,
@@ -664,7 +671,7 @@ function mem_hook_add(
         eval(:(@cfunction($callback, $ret_type, (UcHandle, Cuint, UInt64, Cint, Int64))))
 
     hh = hook_add(
-        emu.handle,
+        emu.handle[],
         type = access_type,
         begin_addr = begin_addr,
         until_addr = until_addr,
@@ -687,7 +694,7 @@ end
 
 function hook_del(emu::Emulator, hook_handle::Csize_t)
 
-    hook_del(emu.handle, hook_handle)
+    hook_del(emu.handle[], hook_handle)
     filter!(h -> h != hook_handle, emu.hooks)
 
     return
@@ -697,7 +704,7 @@ end
 function delete_all_hooks(emu::Emulator)
 
     while length(emu.hooks) > 0
-        hook_del(emu.handle, pop!(emu.hooks))
+        hook_del(emu.handle[], pop!(emu.hooks))
     end
 
 end

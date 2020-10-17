@@ -1,3 +1,7 @@
 *.swp
 peda-*
 
+.gdb_history
+TODO.org
+build/
+deps/
