@@ -1,22 +1,5 @@
 using Test
 
-using Unicorn:
-    Arch,
-    Mode,
-    Emulator,
-    UcHandle,
-    Perm,
-    reg_write,
-    reg_read,
-    mem_map,
-    mem_write,
-    emu_start,
-    X86,
-    mem_read,
-    mem_regions,
-    code_hook_add,
-    delete_all_hooks
-
 using Unicorn
 
 function test_execution()
@@ -55,7 +38,7 @@ function test_execution()
         emu,
         begin_addr = UInt64(0x60_00b0 + 0x6),
         until_addr = UInt64(0),
-        inst_count = UInt64(1),
+        steps = UInt64(1),
     )
 
     result = reg_read(emu, X86.Register.RIP)
@@ -70,6 +53,62 @@ function test_execution()
     @test length(emu.hooks) == 0
 end
 
+
+struct MemoryEvent
+    ip_addr::UInt64
+    address::UInt64
+    access_type::MemoryAccess.t
+    data::Vector{UInt8}
+end
+
+function test_mem_hook()
+
+    # nop
+    # nop
+    # mov 0x8(%rsp), %rdi // memory read
+    # nop
+    # nop
+    code = [0x90, 0x90, 0x48, 0x8b, 0x7c, 0x24, 0x08, 0x90, 0x90]
+
+    emu = Emulator(Arch.X86, Mode.MODE_64)
+
+    mem_map(emu, address = 0, size = 0x1000)
+    mem_write(emu, address = 0, bytes = code)
+
+    reg_write(emu, register = X86.Register.RSP, value = 0x100)
+
+    events = []
+
+    function callback(
+        engine::UcHandle,
+        type::MemoryAccess.t,
+        address::UInt64,
+        size::Cint,
+        data::Int64,
+    )
+        ip_addr = reg_read(engine, X86.Register.RIP)
+        bytes = mem_read(engine, address, size)
+        event = MemoryEvent(ip_addr, address, type, bytes)
+        @show event
+        push!(events, event)
+        return nothing
+    end
+
+    mem_hook_add(emu, access_type = HookType.MEM_READ | HookType.MEM_WRITE, callback = callback)
+
+    emu_start(emu, begin_addr = 0, until_addr = 0x100, steps = 5)
+
+    @show events
+
+    @test events[1].access_type == MemoryAccess.READ
+    @test events[1].address == 0x100 + 8
+    @test events[1].ip_addr == 2
+    @test events[1].data == fill(0, 8)
+
+    delete_all_hooks(emu)
+
+    finalize(emu)
+end
 
 function test_mem_regions()
 
@@ -95,5 +134,6 @@ end
 
 @testset "Test x86_64 conditional execution" begin
     test_execution()
+    test_mem_hook()
     test_mem_regions()
 end

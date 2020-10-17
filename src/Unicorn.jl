@@ -18,6 +18,7 @@ export ARM,
     ARM64,
     Arch,
     Emulator,
+    emu_start,
     HookType,
     M68K,
     MIPS,
@@ -34,10 +35,13 @@ export ARM,
     mem_map,
     mem_regions,
     mem_write,
+    mem_read,
+    delete_all_hooks,
     reg_read,
     reg_write,
     uc_stop,
-    unicorn_version
+    unicorn_version,
+    MemoryAccess
 
 
 include("./architectures/ARM.jl")
@@ -86,22 +90,38 @@ end
 # TODO: add the rest of the modes
 module Mode
 @enum t begin
-    LITTLE_ENDIAN = 0x0000_0000 # Also ARM
-    BIG_ENDIAN = 0x4000_0000
+    LITTLE_ENDIAN = 0
+    BIG_ENDIAN = 1 << 30
 
     # for arm architectures
-    THUMB = 0x0000_0010 # Also MICRO
-    MCLASS = 0x0000_0020
-    V8 = 0x0000_0040
-    ARM926 = 0x0000_0080
-    ARM946 = 0x0000_0100
-    ARM1176 = 0x0000_0200
+    THUMB = 1 << 4
+    MCLASS = 1 << 5
+    V8 = 1 << 6
+    ARM926 = 1 << 7
+    ARM946 = 1 << 8
+    ARM1176 = 1 << 9
 
     # for x86 and x86_64
     MODE_16 = 1 << 1
     MODE_32 = 1 << 2
     MODE_64 = 1 << 3
 end
+# aliases
+    ARM = LITTLE_ENDIAN
+    MICRO = THUMB
+    MIPS3 = MCLASS
+    MIPS32R6 = V8
+    MIPS32 = MODE_32
+    MIPS64 = MODE_64
+    PPC32 = MODE_32
+    PPC64 = MODE_64
+    QPX = THUMB
+    SPARC32 = MODE_32
+    SPARC64 = MODE_64
+    V9 = THUMB
+    X_16 = MODE_16
+    X_32 = MODE_32
+    X_64 = MODE_64
 end
 
 module UcError
@@ -189,6 +209,24 @@ mutable struct Emulator
     end
 end
 
+# Special registers
+function instruction_pointer(arch::Arch.t, mode::Mode.t)::Register
+    arch == Arch.X86 && mode == Mode.MODE_64 && return X86.Register.RIP
+    arch == Arch.X86 && mode == Mode.MODE_32 && return X86.Register.EIP
+    arch == Arch.X86 && mode == Mode.MODE_16 && return X86.Register.IP
+    arch == Arch.ARM && return ARM.Register.PC
+    arch == Arch.ARM64 && return ARM64.Register.PC
+    arch == Arch.MIPS && return MIPS.Register.PC
+    arch == Arch.SPARC && return SPARC.Register.PC
+    arch == Arch.M68K && return M68K.Register.PC
+    @error("Unsuported Arch and Mode combination.")
+end
+
+function instruction_pointer(emu::Emulator)::R where {R<:Register}
+    return instruction_pointer(emu.arch, emu.mode)
+end
+
+
 function check(result::UcError.t)
     if result != UcError.OK
         throw(UcException(result))
@@ -237,7 +275,7 @@ Emulate machine code in a specific duration of time.
 - until_addr: address where emulation stops (i.e when this address is hit)
 - μs_timeout: duration to emulate the code (in microseconds). When this value is 0,
        we will emulate the code in infinite time, until the code is finished.
-- inst_count: the number of instructions to be emulated. When this value is 0,
+- steps: the number of instructions to be emulated. When this value is 0,
        we will emulate all the code available, until the code is finished.
 
 - return UC_ERR_OK on success, or other value on failure (refer to uc_err enum
@@ -248,7 +286,7 @@ function emu_start(
     begin_addr::UInt64,
     until_addr::UInt64,
     μs_timeout::UInt64,
-    inst_count::UInt64,
+    steps::UInt64,
 )::UcError.t
     uc_emu_start = Libdl.dlsym(LIBUNICORN, :uc_emu_start)
     ccall(
@@ -259,7 +297,7 @@ function emu_start(
         begin_addr,
         until_addr,
         μs_timeout,
-        inst_count,
+        steps,
     )
 
 end
@@ -269,14 +307,14 @@ function emu_start(
     begin_addr::M = 0,
     until_addr::N = 0,
     μs_timeout::O = 0,
-    inst_count::P = 0,
+    steps::P = 0,
 )::UcError.t where {M<:Integer,N<:Integer,O<:Integer,P<:Integer}
     emu_start(
         emu,
         UInt64(begin_addr),
         UInt64(until_addr),
         UInt64(μs_timeout),
-        UInt64(inst_count),
+        UInt64(steps),
     )
 end
 
@@ -380,7 +418,11 @@ function reg_write(emu::Emulator; register::R, value::T) where {T<:Integer,R<:Re
 end
 
 
-function mem_read(handle::UcHandle, address::UInt64, size::UInt64)::Vector{UInt8}
+function mem_read(
+    handle::UcHandle,
+    address::M,
+    size::N,
+)::Vector{UInt8} where {M<:Integer,N<:Integer}
 
     bytes = Vector{UInt8}(undef, size)
 
@@ -638,9 +680,12 @@ appears to be undocumented).
 
 - handle of the unicorn emulator, `UcHandle`
 - type of memory action (`MemoryAccess.t`)
-- address of the code being executed, `UInt64`
+- address targetted by the memory access event, `UInt64`
 - size of data being read from or written to memory, `Cint`
 - value of data being written to memory, `Int64`
+
+The instruction pointer address can be obtained by reading the appropriate
+register.
 
 These callbacks should return `true`, unless the type of memory access
 being hooked are invalid accesses, in which case a `false` can be 
@@ -668,7 +713,7 @@ function mem_hook_add(
     end
 
     c_callback =
-        eval(:(@cfunction($callback, $ret_type, (UcHandle, Cuint, UInt64, Cint, Int64))))
+        eval(:(@cfunction($callback, $ret_type, (UcHandle, MemoryAccess.t, UInt64, Cint, Int64))))
 
     hh = hook_add(
         emu.handle[],
