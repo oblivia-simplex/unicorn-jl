@@ -87,7 +87,6 @@ module Arch
 end
 end
 
-# TODO: add the rest of the modes
 module Mode
 @enum t begin
     LITTLE_ENDIAN = 0
