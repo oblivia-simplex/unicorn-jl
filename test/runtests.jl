@@ -34,7 +34,7 @@ function test_execution()
     end
     code_hook_add(emu, callback = callback)
 
-    emu_start(
+    start(
         emu,
         begin_addr = UInt64(0x60_00b0 + 0x6),
         until_addr = UInt64(0),
@@ -96,7 +96,7 @@ function test_mem_hook()
 
     mem_hook_add(emu, access_type = HookType.MEM_READ | HookType.MEM_WRITE, callback = callback)
 
-    emu_start(emu, begin_addr = 0, until_addr = 0x100, steps = 5)
+    start(emu, begin_addr = 0, until_addr = 0x100, steps = 5)
 
     @show events
 

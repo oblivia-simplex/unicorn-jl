@@ -18,7 +18,7 @@ export ARM,
     ARM64,
     Arch,
     Emulator,
-    emu_start,
+    start,
     HookType,
     M68K,
     MIPS,
@@ -29,7 +29,7 @@ export ARM,
     UcHandle,
     X86,
     code_hook_add,
-    emu_start,
+    start,
     interrupt_hook_add,
     mem_hook_add,
     mem_map,
@@ -222,7 +222,7 @@ function instruction_pointer(arch::Arch.t, mode::Mode.t)::Register
     @error("Unsuported Arch and Mode combination.")
 end
 
-function instruction_pointer(emu::Emulator)::R where {R<:Register}
+function instruction_pointer(emu::Emulator)::Register
     return instruction_pointer(emu.arch, emu.mode)
 end
 
@@ -271,7 +271,7 @@ end
 """
 Map an existing array into memory. Be careful with this, and make sure that the garbage collector doesn't drop it.
 """
-function mem_map_array(handle::UcHandle; address::N = 0, size::M = 0, perms::Perm.t = Perm.ALL, array = Array) where {M<:Integer, N<:Integer}
+function mem_map_array(handle::UcHandle; address::Integer = 0, size::Integer = 0, perms::Perm.t = Perm.ALL, array = Array)
     uc_mem_map_ptr = Libdl.dlsym(LIBUNICORN, :uc_mem_map_ptr)
     check(ccall(
         uc_mem_map_ptr,
@@ -289,8 +289,7 @@ Map an existing array to memory. This will let the caller manipulate and access
 the emulator's memory directly. A reference to the backing array is maintained 
 in the `Emulator` struct, to prevent premature garbage collection.
 """
-function mem_map_array(emu::Emulator; address::N = 0, size::M = 0, perms::Perm.t = Perm.ALL, array = Array) where {M<:Integer, N<:Integer}
-    @assert length(array) >= size
+function mem_map_array(emu::Emulator; address::Integer = 0, size::Integer = 0, perms::Perm.t = Perm.ALL, array = Array)
     mem_map_array(emu.handle[], address = address, size = size, perms = perms, array = array)
     emu.array_backed_memory[UInt64(address)] = array # To protect from the GC
 end
@@ -308,7 +307,7 @@ Emulate machine code in a specific duration of time.
 - return UC_ERR_OK on success, or other value on failure (refer to uc_err enum
   for detailed error).
 """
-function emu_start(
+function start(
     emu::Emulator,
     begin_addr::UInt64,
     until_addr::UInt64,
@@ -329,14 +328,14 @@ function emu_start(
 
 end
 
-function emu_start(
+function start(
     emu::Emulator;
-    begin_addr::M = 0,
-    until_addr::N = 0,
-    μs_timeout::O = 0,
-    steps::P = 0,
-)::UcError.t where {M<:Integer,N<:Integer,O<:Integer,P<:Integer}
-    emu_start(
+    begin_addr::Integer = 0,
+    until_addr::Integer = 0,
+    μs_timeout::Integer = 0,
+    steps::Integer = 0,
+)::UcError.t
+    start(
         emu,
         UInt64(begin_addr),
         UInt64(until_addr),
@@ -367,25 +366,25 @@ written to must be mapped, beforehand, using the `mem_map()` method.
 This method will throw a `UcException` if an attempt is made to write to
 unmapped memory. 
 """
-function mem_write(emu::Emulator; address::N, bytes::Vector{UInt8}) where {N<:Integer}
+function mem_write(emu::Emulator; address::Integer, bytes::Vector{UInt8})
     mem_write(emu.handle[], address = UInt64(address), bytes = bytes)
 end
 
 
-function reg_read(handle::UcHandle, regid::Int)::UInt64
+function reg_read(handle::UcHandle, register::Int)::UInt64
 
     value = Ref{UInt64}()
     value[] = 0x0000_0000_0000_0000
 
     uc_reg_read = Libdl.dlsym(LIBUNICORN, :uc_reg_read)
-    check(ccall(uc_reg_read, UcError.t, (UcHandle, Int, Ptr{UInt64}), handle, regid, value))
+    check(ccall(uc_reg_read, UcError.t, (UcHandle, Int, Ptr{UInt64}), handle, register, value))
 
     return value[]
 
 end
 
-function reg_read(handle::UcHandle, regid::R)::UInt64 where {R<:Register}
-    reg_read(handle, Int(regid))
+function reg_read(handle::UcHandle, register::Register)::UInt64
+    reg_read(handle, Int(register))
 end
 
 """
@@ -394,13 +393,13 @@ appropriate architecture's register identifiers are used.
 
 This method may throw a `UcException` if something goes wrong.
 """
-function reg_read(emu::Emulator, regid::R)::UInt64 where {R<:Register}
-    reg_read(emu.handle[], regid)
+function reg_read(emu::Emulator, register::Register)::UInt64
+    reg_read(emu.handle[], register)
 end
 
 # FIXME: this doesn't work yet
-# function reg_read_batch(handle::UcHandle, regids::Vector{Int})
-#     count = length(regids)
+# function reg_read_batch(handle::UcHandle, registers::Vector{Int})
+#     count = length(registers)
 #     values = Ref{Ptr{UInt64}}() #Vector{UInt64}(undef, count)
 # 
 #     uc_reg_read_batch = Libdl.dlsym(LIBUNICORN, :uc_reg_read_batch)
@@ -410,7 +409,7 @@ end
 #         UcError.t,
 #         (UcHandle, Ptr{Int}, Ref{Ptr{UInt64}}, Int),
 #         handle,
-#         pointer(regids),
+#         pointer(registers),
 #         values,
 #         count,
 #     ))
@@ -419,37 +418,36 @@ end
 # 
 # end
 # 
-# function reg_read_batch(emu::Emulator, regids::Vector{R}) where { R <: Register }
-#     reg_read_batch(emu.handle[], [Int(r) for r in regids])
+# function reg_read_batch(emu::Emulator, registers::Vector{R})
+#     reg_read_batch(emu.handle[], [Int(r) for r in registers])
 # end
 
-function reg_write(handle::UcHandle, regid::R, value::T) where {T<:Integer,R<:Register}
-    value = UInt64(value)
-    regid = Int(regid)
+function reg_write(handle::UcHandle, register::Register, value::Integer)
+    register = Int(register)
     uc_reg_write = Libdl.dlsym(LIBUNICORN, :uc_reg_write)
     check(ccall(
         uc_reg_write,
         UcError.t,
         (UcHandle, Int, Ref{UInt64}),
         handle,
-        regid,
-        Ref(value),
+        register,
+        Ref(UInt64(value)),
     ))
 end
 
 """
 Write a value to an emulator register. May throw a `UcException` if misused.
 """
-function reg_write(emu::Emulator; register::R, value::T) where {T<:Integer,R<:Register}
-    reg_write(emu.handle[], register, value)
+function reg_write(emu::Emulator; register::Register, value::Integer)
+    reg_write(emu.handle[], register, UInt64(value))
 end
 
 
 function mem_read(
     handle::UcHandle,
-    address::M,
-    size::N,
-)::Vector{UInt8} where {M<:Integer,N<:Integer}
+    address::Integer,
+    size::Integer,
+)::Vector{UInt8}
 
     bytes = Vector{UInt8}(undef, size)
 
@@ -472,9 +470,9 @@ Read `size` bytes from `address` in emulator memory.
 """
 function mem_read(
     emu::Emulator;
-    address::M = 0,
-    size::N = 0,
-)::Vector{UInt8} where {M<:Integer,N<:Integer}
+    address::Integer = 0,
+    size::Integer = 0,
+)::Vector{UInt8}
     mem_read(emu.handle[], UInt64(address), UInt64(size))
 end
 
@@ -524,11 +522,11 @@ const HookHandle = Csize_t
 function hook_add(
     handle::UcHandle;
     type::HookType.t,
-    begin_addr::N,
-    until_addr::M,
+    begin_addr::Integer,
+    until_addr::Integer,
     c_callback::Ptr{Cvoid},
     user_data = Ref{Ptr{Cvoid}}()[],
-) where {M<:Integer,N<:Integer}
+)
 
     # do we need to do anything with user data? is it good enough if the
     # callback is a closure?
@@ -559,10 +557,10 @@ Code hook callbacks must be void functions with three parameters:
 function code_hook_add(
     emu::Emulator;
     type::HookType.t = HookType.CODE,
-    begin_addr::N = 1,
-    until_addr::M = 0,
+    begin_addr::Integer = 1,
+    until_addr::Integer = 0,
     callback::Function, # Must have the signature $CODE_HOOK_SIGNATURE
-)::Csize_t where {M<:Integer,N<:Integer}
+)::Csize_t
 
     @assert type == HookType.CODE || type == HookType.BLOCK "Invalid hook type."
 
@@ -588,10 +586,10 @@ Interrupt hook callbacks should take two parameters:
 """
 function interrupt_hook_add(
     emu::Emulator;
-    begin_addr::M = 1,
-    until_addr::N = 0,
+    begin_addr::Integer = 1,
+    until_addr::Integer = 0,
     callback::Function,
-)::Csize_t where {M<:Integer,N<:Integer}
+)::Csize_t
 
     c_callback = eval(:(@cfunction($callback, Cvoid, (UcHandle, Cuint))))
 
@@ -617,10 +615,10 @@ the program with an invalid instruction error.
 """
 function invalid_inst_hook_add(
     emu::Emulator;
-    begin_addr::M = 1,
-    until_addr::N = 0,
+    begin_addr::Integer = 1,
+    until_addr::Integer = 0,
     callback::Function,
-)::Csize_t where {M<:Integer,N<:Integer}
+)::Csize_t
 
     c_callback = eval(:(@cfunction($callback, Bool, (UcHandle,))))
 
@@ -652,11 +650,11 @@ returning an error code, which will throw `UcException(HOOK::t = 9)`.
 """
 function x86_instruction_hook_add(
     emu::Emulator;
-    begin_addr::M = 1,
-    until_addr::N = 0,
+    begin_addr::Integer = 1,
+    until_addr::Integer = 0,
     instruction_id::X86.Instruction.t,
     callback::Function,
-)::Csize_t where {M<:Integer,N<:Integer}
+)::Csize_t
 
     c_callback = eval(:(@cfunction($callback, Cvoid, (UcHandle, Cuint, Cint, Cuint))))
 
@@ -720,11 +718,11 @@ returned by the callback to stop execution.
 """
 function mem_hook_add(
     emu::Emulator;
-    begin_addr::M = 1,
-    until_addr::N = 0,
+    begin_addr::Integer = 1,
+    until_addr::Integer = 0,
     access_type::HookType.t = HookType.MEM_READ,
     callback::Function,
-)::Csize_t where {M<:Integer,N<:Integer}
+)::Csize_t
 
     ret_type = Cvoid
 
