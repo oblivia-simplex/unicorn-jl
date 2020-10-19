@@ -33,8 +33,10 @@ export ARM,
     interrupt_hook_add,
     mem_hook_add,
     mem_map,
+    mem_map_array,
     mem_regions,
     mem_write,
+    mem_protect,
     mem_read,
     delete_all_hooks,
     reg_read,
@@ -275,6 +277,8 @@ function mem_map(emu::Emulator; address = 0, size = 4096, perms::Perm.t = Perm.A
 end
 
 """
+    mem_map_array(handle::UcHandle; address::Integer, size::Integer, perms::Perm.t, array::Array)
+
 Map an existing array into memory. Be careful with this, and make sure that the garbage collector doesn't drop it.
 """
 function mem_map_array(
@@ -301,6 +305,8 @@ function mem_map_array(
 end
 
 """
+    mem_map_array(emu::Emulator; address::Integer, size::Integer, perms::Perm.t, array::Array)
+
 Map an existing array to memory. This will let the caller manipulate and access
 the emulator's memory directly. A reference to the backing array is maintained 
 in the `Emulator` struct, to prevent premature garbage collection.
@@ -825,6 +831,26 @@ function delete_all_hooks(emu::Emulator)
         hook_del(emu.handle[], pop!(emu.hooks))
     end
 
+end
+
+function mem_protect(handle::UcHandle; address::Integer, size::Integer, perms::Perm.t)
+    uc_mem_protect = Libdl.dlsym(LIBUNICORN, :uc_mem_protect)
+    g = GC.enable(false)
+    check(ccall(uc_mem_protect, UcError.t, (UcHandle, UInt64, UInt32, UInt32),
+                handle, address, size, perms))
+    GC.enable(g)
+    return
+end
+
+"""
+    mem_protect(emu::Emulator; addresss::Integer, size::Integer, perms::Perm.t)
+
+Change the memory permissions on an existing region of emulation memory.
+
+May throw a `UcException` if used improperly.
+"""
+function mem_protect(emu::Emulator; address::Integer, size::Integer, perms::Perm.t)
+    mem_protect(emu.handle[], address = address, size = size, perms = perms)
 end
 
 """
