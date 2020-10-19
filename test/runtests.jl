@@ -61,6 +61,10 @@ struct MemoryEvent
     data::Vector{UInt8}
 end
 
+mutable struct Container
+    v::Vector
+end
+
 function test_mem_hook()
 
     # nop
@@ -68,7 +72,10 @@ function test_mem_hook()
     # mov 0x8(%rsp), %rdi // memory read
     # nop
     # nop
-    code = [0x90, 0x90, 0x48, 0x8b, 0x7c, 0x24, 0x08, 0x90, 0x90]
+    # int 0x80
+    # INVALID INSTRUCTION
+    code =
+        [0x90, 0x90, 0x48, 0x8b, 0x7c, 0x24, 0x08, 0x90, 0x90, 0xcc, 0x80, 0x37, 0x00, 0x00]
 
     emu = Emulator(Arch.X86, Mode.MODE_64)
 
@@ -77,28 +84,56 @@ function test_mem_hook()
 
     reg_write(emu, register = X86.Register.RSP, value = 0x100)
 
-    events = []
+    events::Vector{MemoryEvent} = []
+    sizehint!(events, 100)
 
-    function callback(
-        engine::UcHandle,
-        type::MemoryAccess.t,
-        address::UInt64,
-        size::Cint,
-        data::Int64,
+    mem_callback = begin
+        let events = events
+            function closure(
+                engine::UcHandle,
+                type::MemoryAccess.t,
+                address::UInt64,
+                size::Cint,
+                data::Int64,
+            )
+                ip_addr = reg_read(engine, X86.Register.RIP)
+                bytes = mem_read(engine, address, size)
+                event = MemoryEvent(ip_addr, address, type, bytes)
+                #@show event
+                push!(events, event)
+                return nothing
+            end
+            closure
+        end
+    end
+    mem_hook_add(
+        emu,
+        access_type = HookType.MEM_READ | HookType.MEM_WRITE,
+        callback = mem_callback,
     )
-        ip_addr = reg_read(engine, X86.Register.RIP)
-        bytes = mem_read(engine, address, size)
-        event = MemoryEvent(ip_addr, address, type, bytes)
-        @show event
-        push!(events, event)
-        return nothing
+
+
+    interrupts::Vector{Tuple{UInt64,UInt32}} = []
+    sizehint!(interrupts, 100)
+
+    let ip = instruction_pointer(emu)
+        interrupts = interrupts
+        function int_callback(engine, interrupt)
+            ip_val = reg_read(engine, ip)
+            println("Interrupt $(interrupt) at address $(ip_val)")
+            push!(interrupts, (ip_val, interrupt))
+            return
+        end
+        interrupt_hook_add(emu, callback = int_callback)
     end
 
-    mem_hook_add(emu, access_type = HookType.MEM_READ | HookType.MEM_WRITE, callback = callback)
 
-    start(emu, begin_addr = 0, until_addr = 0x100, steps = 5)
+    res = start(emu, begin_addr = 0, until_addr = 0x100, steps = 9)
+    @show res
 
-    @show events
+    @test interrupts[1] == (10, 3)
+
+    @show length(events)
 
     @test events[1].access_type == MemoryAccess.READ
     @test events[1].address == 0x100 + 8
@@ -132,8 +167,9 @@ function test_mem_regions()
 
 end
 
-@testset "Test x86_64 conditional execution" begin
+@testset "Test Emulator" begin
     test_execution()
     test_mem_hook()
     test_mem_regions()
+    @test unicorn_version() == v"1.0.0"
 end
