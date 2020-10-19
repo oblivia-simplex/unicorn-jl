@@ -38,6 +38,7 @@ export ARM,
     mem_write,
     mem_protect,
     mem_read,
+    hook_del,
     delete_all_hooks,
     reg_read,
     reg_write,
@@ -488,7 +489,7 @@ function reg_write(emu::Emulator; register::Register, value::Integer)
 end
 
 
-function mem_read(handle::UcHandle, address::Integer, size::Integer)::Vector{UInt8}
+function mem_read(handle::UcHandle; address::Integer, size::Integer)::Vector{UInt8}
 
     bytes = Vector{UInt8}(undef, size)
 
@@ -511,7 +512,7 @@ end
 Read `size` bytes from `address` in emulator memory.
 """
 function mem_read(emu::Emulator; address::Integer = 0, size::Integer = 0)::Vector{UInt8}
-    mem_read(emu.handle[], UInt64(address), UInt64(size))
+    mem_read(emu.handle[], address = UInt64(address), size = UInt64(size))
 end
 
 # This method is primarily to be used in hooks, where we have access only

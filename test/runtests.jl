@@ -22,7 +22,7 @@ function test_execution()
     mem_write(emu, address = UInt64(0x60_00b0), bytes = code)
 
     # Test to ensure that we can read those bytes back
-    code_read = mem_read(emu, address = UInt64(0x60_00b0), size = length(code))
+    code_read = mem_read(emu, address = 0x60_00b0, size = length(code))
     @test code_read == code
 
     # Test code hooks
@@ -98,7 +98,7 @@ function test_mem_hook()
                 data::Int64,
             )
                 ip_addr = reg_read(engine, X86.Register.RIP)
-                bytes = mem_read(engine, address, size)
+                bytes = mem_read(engine, address = address, size = size)
                 event = MemoryEvent(ip_addr, address, type, bytes)
                 #@show event
                 push!(events, event)
