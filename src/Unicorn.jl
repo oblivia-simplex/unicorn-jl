@@ -817,7 +817,7 @@ end
 function hook_del(emu::Emulator, hook_handle::Csize_t)
 
     hook_del(emu.handle[], hook_handle)
-    delete!(hook_handle, emu.hooks)
+    delete!(emu.hooks, hook_handle)
 
     return
 
