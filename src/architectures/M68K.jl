@@ -25,6 +25,9 @@ module Register
     ENDING = 19
 end
 
+# Aliases
+SP = A7
+
 end
 
 end

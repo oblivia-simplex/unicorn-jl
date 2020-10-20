@@ -187,7 +187,7 @@ end
 const UcHandle = Ptr{Cvoid}
 
 function uc_close(uc::UcHandle)
-    @async println("Closing and freeing unicorn emulator at $(uc)...")
+    @async @debug "Closing and freeing unicorn emulator at $(uc)..." 
     uc_close = Libdl.dlsym(LIBUNICORN, :uc_close)
     ccall(uc_close, Nothing, (UcHandle,), uc)
     return uc
@@ -199,17 +199,22 @@ mutable struct Emulator
     arch::Arch.t
     mode::Mode.t
     handle::Ref{UcHandle}
-    hooks::Vector{Csize_t}
+    hooks::Dict{Csize_t, Function}
     array_backed_memory::Dict{UInt64,Array}
 
     # Constructor
     Emulator(arch::Arch.t, mode::Mode.t) = begin
         uc = Ref{UcHandle}()
         uc_open = Libdl.dlsym(LIBUNICORN, :uc_open)
-        g = GC.enable(false)
-        check(ccall(uc_open, UcError.t, (UInt, UInt, Ref{UcHandle}), arch, mode, uc))
-        GC.enable(g)
-        emu = new(arch, mode, uc, [], Dict())
+        GC.@preserve uc check(ccall(
+            uc_open,
+            UcError.t,
+            (UInt, UInt, Ref{UcHandle}),
+            arch,
+            mode,
+            uc,
+        ))
+        emu = new(arch, mode, uc, Dict(), Dict())
         finalizer(e -> uc_close(e.handle[]), emu)
         return emu
     end
@@ -217,9 +222,11 @@ end
 
 # Special registers
 function instruction_pointer(arch::Arch.t, mode::Mode.t)::Register
-    arch == Arch.X86 && mode == Mode.MODE_64 && return X86.Register.RIP
-    arch == Arch.X86 && mode == Mode.MODE_32 && return X86.Register.EIP
-    arch == Arch.X86 && mode == Mode.MODE_16 && return X86.Register.IP
+    if arch == Arch.X86
+        mode == Mode.MODE_64 && return X86.Register.RIP
+        mode == Mode.MODE_32 && return X86.Register.EIP
+        mode == Mode.MODE_16 && return X86.Register.IP
+    end
     arch == Arch.ARM && return ARM.Register.PC
     arch == Arch.ARM64 && return ARM64.Register.PC
     arch == Arch.MIPS && return MIPS.Register.PC
@@ -230,6 +237,19 @@ end
 
 function instruction_pointer(emu::Emulator)::Register
     return instruction_pointer(emu.arch, emu.mode)
+end
+
+function stack_pointer(arch::Arch.t, mode::Mode.t)::Register
+    if arch == Arch.X86
+        mode == Mode.MODE_64 && return X86.Register.RSP
+        mode == Mode.MODE_32 && return X86.Register.ESP
+        mode == Mode.MODE_16 && return X86.Register.SP
+    end
+    arch == Arch.ARM && return ARM.Register.SP
+    arch == Arch.MIPS && return MIPS.Register.SP
+    arch == Arch.SPARC && return SPARC.Register.SP
+    arch == Arch.M68K && return M68K.Register.SP
+    @error("Unsupported Arch and Mode combination.")
 end
 
 
@@ -259,8 +279,7 @@ function mem_map(
     perms::Perm.t = Perm.ALL,
 )
     uc_mem_map = Libdl.dlsym(LIBUNICORN, :uc_mem_map)
-    g = GC.enable(false)
-    check(ccall(
+    GC.@preserve handle check(ccall(
         uc_mem_map,
         UcError.t,
         (UcHandle, UInt64, UInt, UInt32),
@@ -269,7 +288,6 @@ function mem_map(
         size,
         perms,
     ))
-    GC.enable(true)
     return
 end
 
@@ -290,8 +308,7 @@ function mem_map_array(
     array = Array,
 )
     uc_mem_map_ptr = Libdl.dlsym(LIBUNICORN, :uc_mem_map_ptr)
-    g = GC.enable(false)
-    check(ccall(
+    GC.@preserve handle array check(ccall(
         uc_mem_map_ptr,
         UcError.t,
         (UcHandle, UInt64, UInt, UInt32, Ptr{Cvoid}),
@@ -301,7 +318,6 @@ function mem_map_array(
         perms,
         pointer(array),
     ))
-    GC.enable(true)
     return
 end
 
@@ -350,7 +366,7 @@ function start(
     steps::UInt64,
 )::UcError.t
     uc_emu_start = Libdl.dlsym(LIBUNICORN, :uc_emu_start)
-    g = GC.enable(false)
+
     res = ccall(
         uc_emu_start,
         UcError.t,
@@ -361,7 +377,6 @@ function start(
         μs_timeout,
         steps,
     )
-    GC.enable(g)
     return res
 
 end
@@ -380,8 +395,7 @@ function mem_write(handle::UcHandle; address::UInt64, bytes::Vector{UInt8})
     size = length(bytes)
     ptr = pointer(bytes)
     uc_mem_write = Libdl.dlsym(LIBUNICORN, :uc_mem_write)
-    g = GC.enable(false)
-    check(ccall(
+    GC.@preserve handle bytes check(ccall(
         uc_mem_write,
         UcError.t,
         (UcHandle, UInt64, (Ptr{UInt8}), UInt),
@@ -390,7 +404,6 @@ function mem_write(handle::UcHandle; address::UInt64, bytes::Vector{UInt8})
         ptr,
         size,
     ))
-    GC.enable(g)
     return
 end
 
@@ -412,8 +425,7 @@ function reg_read(handle::UcHandle, register::Int)::UInt64
     value[] = 0x0000_0000_0000_0000
 
     uc_reg_read = Libdl.dlsym(LIBUNICORN, :uc_reg_read)
-    g = GC.enable(false)
-    check(ccall(
+    GC.@preserve handle value check(ccall(
         uc_reg_read,
         UcError.t,
         (UcHandle, Int, Ptr{UInt64}),
@@ -421,7 +433,6 @@ function reg_read(handle::UcHandle, register::Int)::UInt64
         register,
         value,
     ))
-    GC.enable(g)
     return value[]
 
 end
@@ -468,8 +479,7 @@ end
 function reg_write(handle::UcHandle, register::Register, value::Integer)
     register = Int(register)
     uc_reg_write = Libdl.dlsym(LIBUNICORN, :uc_reg_write)
-    g = GC.enable(false)
-    check(ccall(
+    GC.@preserve handle value check(ccall(
         uc_reg_write,
         UcError.t,
         (UcHandle, Int, Ref{UInt64}),
@@ -477,7 +487,6 @@ function reg_write(handle::UcHandle, register::Register, value::Integer)
         register,
         Ref(UInt64(value)),
     ))
-    GC.enable(g)
     return
 end
 
@@ -494,8 +503,7 @@ function mem_read(handle::UcHandle; address::Integer, size::Integer)::Vector{UIn
     bytes = Vector{UInt8}(undef, size)
 
     uc_mem_read = Libdl.dlsym(LIBUNICORN, :uc_mem_read)
-    g = GC.enable(false)
-    check(ccall(
+    GC.@preserve handle bytes check(ccall(
         uc_mem_read,
         UcError.t,
         (UcHandle, UInt64, Ptr{UInt8}, UInt64),
@@ -504,7 +512,6 @@ function mem_read(handle::UcHandle; address::Integer, size::Integer)::Vector{UIn
         pointer(bytes),
         size,
     ))
-    GC.enable(g)
     return bytes
 end
 
@@ -519,9 +526,7 @@ end
 # to the bare UC handle, and not the Emulator wrapper struct.
 function uc_stop(handle::UcHandle)
     uc_emu_stop = Libdl.dlsym(LIBUNICORN, :uc_emu_stop)
-    g = GC.enable(false)
-    check(ccall(uc_emu_stop, UcError.t, (UcHandle,), handle))
-    GC.enable(g)
+    GC.@preserve handle check(ccall(uc_emu_stop, UcError.t, (UcHandle,), handle))
     return
 end
 
@@ -540,8 +545,7 @@ function mem_regions(handle::UcHandle) # ::Vector{MemRegion}
     count[] = 0x0000_0000
 
     uc_mem_regions = Libdl.dlsym(LIBUNICORN, :uc_mem_regions)
-    g = GC.enable(false)
-    check(ccall(
+    GC.@preserve handle regions check(ccall(
         uc_mem_regions,
         UcError.t,
         (UcHandle, Ref{Ptr{MemRegion}}, Ptr{UInt32}),
@@ -549,7 +553,6 @@ function mem_regions(handle::UcHandle) # ::Vector{MemRegion}
         regions,
         count,
     ))
-    GC.enable(g)
 
     # TODO: figure out if we need to free thse with `uc_free()`
     # I'm not really sure. if so, we should free them here, once we've
@@ -576,8 +579,7 @@ function hook_add(
     # callback is a closure?
     uc_hook_add = Libdl.dlsym(LIBUNICORN, :uc_hook_add)
     hook_handle = Ref{Csize_t}(0)
-    g = GC.enable(false)
-    check(ccall(
+    GC.@preserve handle c_callback check(ccall(
         uc_hook_add,
         UcError.t,
         (UcHandle, Ref{Csize_t}, Cuint, Ptr{Cvoid}, Ptr{Cvoid}, UInt64, UInt64),
@@ -589,7 +591,6 @@ function hook_add(
         begin_addr,
         until_addr,
     ))
-    GC.enable(true)
 
     hook_handle[]
 end
@@ -620,7 +621,7 @@ function code_hook_add(
         c_callback = c_callback,
     )
 
-    push!(emu.hooks, hh)
+    emu.hooks[hh] = callback
 
     hh
 end
@@ -647,7 +648,7 @@ function interrupt_hook_add(
         c_callback = c_callback,
     )
 
-    push!(emu.hooks, hh)
+    emu.hooks[hh] = callback
 
     hh
 
@@ -676,7 +677,7 @@ function invalid_inst_hook_add(
         c_callback = c_callback,
     )
 
-    push!(emu.hooks, hh)
+    emu.hooks[hh] = callback
 
     hh
 end
@@ -709,8 +710,7 @@ function x86_instruction_hook_add(
 
     user_data = Ref{Ptr{Cvoid}}()[]
 
-    g = GC.enable(false)
-    check(ccall(
+    GC.@preserve c_callback callback user_data check(ccall(
         uc_hook_add,
         UcError.t,
         (UcHandle, Ref{Csize_t}, Cuint, Ptr{Cvoid}, Ptr{Cvoid}, UInt64, UInt64, Cuint),
@@ -723,9 +723,8 @@ function x86_instruction_hook_add(
         until_addr,
         instruction_id,
     ))
-    GC.enable(g)
 
-    push!(emu.hooks, hook_handle[])
+    emu.hooks[hook_handle[]] = callback
 
     hook_handle[]
 end
@@ -801,7 +800,7 @@ function mem_hook_add(
         c_callback = c_callback,
     )
 
-    push!(emu.hooks, hh)
+    emu.hooks[hh] = callback
 
     hh
 
@@ -811,16 +810,14 @@ function hook_del(uc_handle::UcHandle, hook_handle::Csize_t)
 
     uc_hook_del = Libdl.dlsym(LIBUNICORN, :uc_hook_del)
 
-    g = GC.enable(false)
-    check(ccall(uc_hook_del, UcError.t, (UcHandle, Csize_t), uc_handle, hook_handle))
-    GC.enable(g)
+    GC.@preserve uc_handle check(ccall(uc_hook_del, UcError.t, (UcHandle, Csize_t), uc_handle, hook_handle))
 
 end
 
 function hook_del(emu::Emulator, hook_handle::Csize_t)
 
     hook_del(emu.handle[], hook_handle)
-    filter!(h -> h != hook_handle, emu.hooks)
+    delete!(hook_handle, emu.hooks)
 
     return
 
@@ -829,17 +826,22 @@ end
 function delete_all_hooks(emu::Emulator)
 
     while length(emu.hooks) > 0
-        hook_del(emu.handle[], pop!(emu.hooks))
+        hook_del(emu.handle[], pop!(emu.hooks).first)
     end
 
 end
 
 function mem_protect(handle::UcHandle; address::Integer, size::Integer, perms::Perm.t)
     uc_mem_protect = Libdl.dlsym(LIBUNICORN, :uc_mem_protect)
-    g = GC.enable(false)
-    check(ccall(uc_mem_protect, UcError.t, (UcHandle, UInt64, UInt32, UInt32),
-                handle, address, size, perms))
-    GC.enable(g)
+    GC.@preserve handle check(ccall(
+        uc_mem_protect,
+        UcError.t,
+        (UcHandle, UInt64, UInt32, UInt32),
+        handle,
+        address,
+        size,
+        perms,
+    ))
     return
 end
 

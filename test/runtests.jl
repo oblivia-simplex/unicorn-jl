@@ -17,7 +17,12 @@ function test_execution()
     reg_write(emu, register = X86.Register.EFLAGS, value = Int(0x0000_0000_0000_0246))
     @test reg_read(emu, X86.Register.EFLAGS) == 0x0000_0000_0000_0246
 
-    mem_map(emu, address = 0x0000_0000_0060_0000, size = 0x0000_0000_0000_1000, perms = Perm.NONE)
+    mem_map(
+        emu,
+        address = 0x0000_0000_0060_0000,
+        size = 0x0000_0000_0000_1000,
+        perms = Perm.NONE,
+    )
     mem_protect(emu, address = 0x60_0000, size = 0x1000, perms = Perm.ALL)
     mem_write(emu, address = UInt64(0x60_00b0), bytes = code)
 
