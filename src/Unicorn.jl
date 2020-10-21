@@ -307,6 +307,9 @@ function mem_map_array(
     perms::Perm.t = Perm.ALL,
     array = Array,
 )
+    if size == 0
+        size = length(array)
+    end
     uc_mem_map_ptr = Libdl.dlsym(LIBUNICORN, :uc_mem_map_ptr)
     GC.@preserve handle array check(ccall(
         uc_mem_map_ptr,
@@ -359,11 +362,11 @@ Emulate machine code in a specific duration of time.
   for detailed error).
 """
 function start(
-    emu::Emulator,
-    begin_addr::UInt64,
-    until_addr::UInt64,
-    μs_timeout::UInt64,
-    steps::UInt64,
+    emu::Emulator;
+    address::Integer = 0,
+    until::Integer = 0,
+    μs_timeout::Integer = 0,
+    steps::Integer = 0,
 )::UcError.t
     uc_emu_start = Libdl.dlsym(LIBUNICORN, :uc_emu_start)
 
@@ -379,16 +382,6 @@ function start(
     )
     return res
 
-end
-
-function start(
-    emu::Emulator;
-    begin_addr::Integer = 0,
-    until_addr::Integer = 0,
-    μs_timeout::Integer = 0,
-    steps::Integer = 0,
-)::UcError.t
-    start(emu, UInt64(begin_addr), UInt64(until_addr), UInt64(μs_timeout), UInt64(steps))
 end
 
 function mem_write(handle::UcHandle; address::UInt64, bytes::Vector{UInt8})

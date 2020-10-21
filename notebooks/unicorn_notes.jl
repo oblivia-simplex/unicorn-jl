@@ -161,13 +161,13 @@ md"Note that we need to be _extremely_ careful here, or else we risk memory corr
 
 # ╔═╡ 6f0c67a8-1243-11eb-2bbd-dd9a8624ff41
 hook_handle =
-    code_hook_add(emu, begin_addr = 0x1000, until_addr = 0x2000, callback = callback)
+    code_hook_add(emu, address = 0x1000, until = 0x2000, callback = callback)
 
 # ╔═╡ 6b51d77e-1243-11eb-337d-373da2f79e9b
 md"Now we're ready to launch the emulation."
 
 # ╔═╡ f3c05f7c-1243-11eb-38d4-cf3ff655ee21
-start(emu, begin_addr = 0x1000, until_addr = 0x2000, steps = 4)
+start(emu, address = 0x1000, until = 0x2000, steps = 4)
 
 # ╔═╡ 78030b16-1248-11eb-3823-f3b341e9fad2
 md"The `disassembly` vector should now contain the output of the capstone disassembler that we ran in our code hook callback. Let's take a look."

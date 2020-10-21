@@ -42,8 +42,8 @@ function test_execution()
 
     start(
         emu,
-        begin_addr = UInt64(0x60_00b0 + 0x6),
-        until_addr = UInt64(0),
+        address = UInt64(0x60_00b0 + 0x6),
+        until = UInt64(0),
         steps = UInt64(1),
     )
 
@@ -134,7 +134,7 @@ function test_mem_hook()
     end
 
 
-    res = start(emu, begin_addr = 0, until_addr = 0x100, steps = 9)
+    res = start(emu, address = 0, until = 0x100, steps = 9)
     @show res
 
     @test interrupts[1] == (10, 3)
