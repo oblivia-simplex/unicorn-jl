@@ -17,13 +17,13 @@ function test_execution()
     reg_write!(emu, register = X86.Register.EFLAGS, value = Int(0x0000_0000_0000_0246))
     @test reg_read(emu, X86.Register.EFLAGS) == 0x0000_0000_0000_0246
 
-    mem_map(
+    mem_map!(
         emu,
         address = 0x0000_0000_0060_0000,
         size = 0x0000_0000_0000_1000,
         perms = Perm.NONE,
     )
-    mem_protect(emu, address = 0x60_0000, size = 0x1000, perms = Perm.ALL)
+    mem_protect!(emu, address = 0x60_0000, size = 0x1000, perms = Perm.ALL)
     mem_write!(emu, address = UInt64(0x60_00b0), bytes = code)
 
     # Test to ensure that we can read those bytes back
@@ -38,7 +38,7 @@ function test_execution()
         ran_the_callback = true
         return
     end
-    code_hook_add(emu, callback = callback)
+    code_hook_add!(emu, callback = callback)
 
     start(
         emu,
@@ -55,7 +55,7 @@ function test_execution()
     @test addrs == [0x60_00b6, 0x60_00b8]
 
     @test length(emu.hooks) == 1
-    delete_all_hooks(emu)
+    delete_all_hooks!(emu)
     @test length(emu.hooks) == 0
 end
 
@@ -85,7 +85,7 @@ function test_mem_hook()
 
     emu = Emulator(Arch.X86, Mode.MODE_64)
 
-    mem_map(emu, address = 0, size = 0x1000)
+    mem_map!(emu, address = 0, size = 0x1000)
     mem_write!(emu, address = 0, bytes = code)
 
     reg_write!(emu, register = X86.Register.RSP, value = 0x100)
@@ -112,7 +112,7 @@ function test_mem_hook()
             closure
         end
     end
-    mem_hook_add(
+    mem_hook_add!(
         emu,
         access_type = HookType.MEM_READ | HookType.MEM_WRITE,
         callback = mem_callback,
@@ -130,7 +130,7 @@ function test_mem_hook()
             push!(interrupts, (ip_val, interrupt))
             return
         end
-        interrupt_hook_add(emu, callback = int_callback)
+        interrupt_hook_add!(emu, callback = int_callback)
     end
 
 
@@ -146,7 +146,7 @@ function test_mem_hook()
     @test events[1].ip_addr == 2
     @test events[1].data == fill(0, 8)
 
-    delete_all_hooks(emu)
+    delete_all_hooks!(emu)
 
     finalize(emu)
 end
@@ -162,7 +162,7 @@ function test_mem_regions()
     ]
 
     for (address, size, perms) in params
-        mem_map(emu, address = address, size = size, perms = perms)
+        mem_map!(emu, address = address, size = size, perms = perms)
     end
 
     regions = mem_regions(emu)

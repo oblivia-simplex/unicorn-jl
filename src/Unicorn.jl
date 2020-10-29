@@ -28,18 +28,18 @@ export ARM,
     UcException,
     UcHandle,
     X86,
-    code_hook_add,
+    code_hook_add!,
     start,
-    interrupt_hook_add,
-    mem_hook_add,
-    mem_map,
-    mem_map_array,
+    interrupt_hook_add!,
+    mem_hook_add!,
+    mem_map!,
+    mem_map_array!,
     mem_regions,
     mem_write!,
-    mem_protect,
+    mem_protect!,
     mem_read,
-    hook_del,
-    delete_all_hooks,
+    hook_del!,
+    delete_all_hooks!,
     reg_read,
     reg_write!,
     uc_stop,
@@ -290,7 +290,7 @@ This API adds a memory region that can be used by emulation.
    This must be some combination of UC_PROT_READ | UC_PROT_WRITE | UC_PROT_EXEC,
    or this will return with UC_ERR_ARG error.
 """
-function mem_map(
+function mem_map!(
     handle::UcHandle;
     address::UInt64 = 0x0000_0000_0000_0000,
     size::UInt = 0x0000_0000_0000_1000,
@@ -309,16 +309,16 @@ function mem_map(
     return
 end
 
-function mem_map(emu::Emulator; address = 0, size = 4096, perms::Perm.t = Perm.ALL)
-    mem_map(emu.handle[], address = UInt64(address), size = UInt64(size), perms = perms)
+function mem_map!(emu::Emulator; address = 0, size = 4096, perms::Perm.t = Perm.ALL)
+    mem_map!(emu.handle[], address = UInt64(address), size = UInt64(size), perms = perms)
 end
 
 """
-    mem_map_array(handle::UcHandle; address::Integer, size::Integer, perms::Perm.t, array::Array)
+    mem_map_array!(handle::UcHandle; address::Integer, size::Integer, perms::Perm.t, array::Array)
 
 Map an existing array into memory. Be careful with this, and make sure that the garbage collector doesn't drop it.
 """
-function mem_map_array(
+function mem_map_array!(
     handle::UcHandle;
     address::Integer = 0,
     size::Integer = 0,
@@ -343,20 +343,20 @@ function mem_map_array(
 end
 
 """
-    mem_map_array(emu::Emulator; address::Integer, size::Integer, perms::Perm.t, array::Array)
+    mem_map_array!(emu::Emulator; address::Integer, size::Integer, perms::Perm.t, array::Array)
 
 Map an existing array to memory. This will let the caller manipulate and access
 the emulator's memory directly. A reference to the backing array is maintained 
 in the `Emulator` struct, to prevent premature garbage collection.
 """
-function mem_map_array(
+function mem_map_array!(
     emu::Emulator;
     address::Integer = 0,
     size::Integer = 0,
     perms::Perm.t = Perm.ALL,
     array = Array,
 )
-    mem_map_array(
+    mem_map_array!(
         emu.handle[],
         address = address,
         size = size,
@@ -577,7 +577,7 @@ end
 
 const HookHandle = Csize_t
 
-function hook_add(
+function hook_add!(
     handle::UcHandle;
     type::HookType.t,
     begin_addr::Integer,
@@ -612,7 +612,7 @@ Code hook callbacks must be void functions with three parameters:
 - the address, of type `Culonglong` (`UInt64`)
 - the size of the current instruction or block, of type `Cuint` (`UInt32`)
 """
-function code_hook_add(
+function code_hook_add!(
     emu::Emulator;
     type::HookType.t = HookType.CODE,
     begin_addr::Integer = 1,
@@ -624,7 +624,7 @@ function code_hook_add(
 
     c_callback = eval(:(@cfunction($callback, Cvoid, (UcHandle, Culonglong, Cuint))))
 
-    hh = hook_add(
+    hh = hook_add!(
         emu.handle[],
         type = type,
         begin_addr = begin_addr,
@@ -642,7 +642,7 @@ Interrupt hook callbacks should take two parameters:
 - an engine handle, of type `UcHandle`, and
 - the interrupt number, of type `Cuint` (`UInt32`)
 """
-function interrupt_hook_add(
+function interrupt_hook_add!(
     emu::Emulator;
     begin_addr::Integer = 1,
     until_addr::Integer = 0,
@@ -651,7 +651,7 @@ function interrupt_hook_add(
 
     c_callback = eval(:(@cfunction($callback, Cvoid, (UcHandle, Cuint))))
 
-    hh = hook_add(
+    hh = hook_add!(
         emu.handle[],
         type = HookType.INTR,
         begin_addr = begin_addr,
@@ -671,7 +671,7 @@ the handle of the unicorn engine (`UcHandle`), and return
 a `Bool`: `true` to continue execution, or `false` to stop
 the program with an invalid instruction error.
 """
-function invalid_inst_hook_add(
+function invalid_inst_hook_add!(
     emu::Emulator;
     begin_addr::Integer = 1,
     until_addr::Integer = 0,
@@ -680,7 +680,7 @@ function invalid_inst_hook_add(
 
     c_callback = eval(:(@cfunction($callback, Bool, (UcHandle,))))
 
-    hh = hook_add(
+    hh = hook_add!(
         emu.handle[],
         type = HookType.INSN_INVALID,
         begin_addr = begin_addr,
@@ -706,7 +706,7 @@ Currently, the only instructions supported are `IN` and `OUT`.
 Attempts to use other instruction codes will result in Unicorn
 returning an error code, which will throw `UcException(HOOK::t = 9)`.
 """
-function x86_instruction_hook_add(
+function x86_instruction_hook_add!(
     emu::Emulator;
     begin_addr::Integer = 1,
     until_addr::Integer = 0,
@@ -774,7 +774,7 @@ These callbacks should return `true`, unless the type of memory access
 being hooked are invalid accesses, in which case a `false` can be 
 returned by the callback to stop execution.
 """
-function mem_hook_add(
+function mem_hook_add!(
     emu::Emulator;
     begin_addr::Integer = 1,
     until_addr::Integer = 0,
@@ -803,7 +803,7 @@ function mem_hook_add(
         )),
     )
 
-    hh = hook_add(
+    hh = hook_add!(
         emu.handle[],
         type = access_type,
         begin_addr = begin_addr,
@@ -817,7 +817,7 @@ function mem_hook_add(
 
 end
 
-function hook_del(uc_handle::UcHandle, hook_handle::Csize_t)
+function hook_del!(uc_handle::UcHandle, hook_handle::Csize_t)
 
     uc_hook_del = Libdl.dlsym(LIBUNICORN, :uc_hook_del)
 
@@ -825,24 +825,24 @@ function hook_del(uc_handle::UcHandle, hook_handle::Csize_t)
 
 end
 
-function hook_del(emu::Emulator, hook_handle::Csize_t)
+function hook_del!(emu::Emulator, hook_handle::Csize_t)
 
-    hook_del(emu.handle[], hook_handle)
+    hook_del!(emu.handle[], hook_handle)
     delete!(emu.hooks, hook_handle)
 
     return
 
 end
 
-function delete_all_hooks(emu::Emulator)
+function delete_all_hooks!(emu::Emulator)
 
     while length(emu.hooks) > 0
-        hook_del(emu.handle[], pop!(emu.hooks).first)
+        hook_del!(emu.handle[], pop!(emu.hooks).first)
     end
 
 end
 
-function mem_protect(handle::UcHandle; address::Integer, size::Integer, perms::Perm.t)
+function mem_protect!(handle::UcHandle; address::Integer, size::Integer, perms::Perm.t)
     uc_mem_protect = Libdl.dlsym(LIBUNICORN, :uc_mem_protect)
     GC.@preserve handle check(ccall(
         uc_mem_protect,
@@ -857,14 +857,14 @@ function mem_protect(handle::UcHandle; address::Integer, size::Integer, perms::P
 end
 
 """
-    mem_protect(emu::Emulator; addresss::Integer, size::Integer, perms::Perm.t)
+    mem_protect!(emu::Emulator; addresss::Integer, size::Integer, perms::Perm.t)
 
 Change the memory permissions on an existing region of emulation memory.
 
 May throw a `UcException` if used improperly.
 """
-function mem_protect(emu::Emulator; address::Integer, size::Integer, perms::Perm.t)
-    mem_protect(emu.handle[], address = address, size = size, perms = perms)
+function mem_protect!(emu::Emulator; address::Integer, size::Integer, perms::Perm.t)
+    mem_protect!(emu.handle[], address = address, size = size, perms = perms)
 end
 
 """
