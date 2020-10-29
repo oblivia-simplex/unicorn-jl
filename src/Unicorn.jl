@@ -269,6 +269,9 @@ function stack_pointer(arch::Arch.t, mode::Mode.t)::Register
     @error("Unsupported Arch and Mode combination.")
 end
 
+function stack_pointer(emu::Emulator)::Register
+    return stack_pointer(emu.arch, emu.mode)
+end
 
 function check(result::UcError.t)
     if result != UcError.OK
