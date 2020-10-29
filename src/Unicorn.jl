@@ -375,8 +375,8 @@ function start(
         UcError.t,
         (UcHandle, UInt64, UInt64, UInt64, UInt),
         emu.handle[],
-        begin_addr,
-        until_addr,
+        address,
+        until,
         μs_timeout,
         steps,
     )

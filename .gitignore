@@ -1,6 +1,8 @@
 *.swp
 peda-*
 Manifest.toml
+*.mem
+*.backup*
 
 .gdb_history
 TODO.org
