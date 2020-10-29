@@ -44,7 +44,7 @@ text_memory, stack_memory = fill(0x00, 0x2000), fill(0x00, 0x1000)
 
 # ╔═╡ 1ae6694e-1239-11eb-3456-e192b83a369a
 try
-    Unicorn.mem_map_array(
+    Unicorn.mem_map_array!(
         emu,
         address = 0x1000,
         size = 0x2000,
@@ -61,7 +61,7 @@ end
 
 # ╔═╡ f6abd068-123c-11eb-39ef-6741c9490212
 try
-    Unicorn.mem_map_array(
+    Unicorn.mem_map_array!(
         emu,
         address = 0x40_000,
         size = 0x1000,
@@ -167,7 +167,7 @@ hook_handle =
 md"Now we're ready to launch the emulation."
 
 # ╔═╡ f3c05f7c-1243-11eb-38d4-cf3ff655ee21
-start(emu, address = 0x1000, until = 0x2000, steps = 4)
+start!(emu, address = 0x1000, until = 0x2000, steps = 4)
 
 # ╔═╡ 78030b16-1248-11eb-3823-f3b341e9fad2
 md"The `disassembly` vector should now contain the output of the capstone disassembler that we ran in our code hook callback. Let's take a look."

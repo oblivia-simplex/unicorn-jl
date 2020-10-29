@@ -18,7 +18,7 @@ export ARM,
     ARM64,
     Arch,
     Emulator,
-    start,
+    start!,
     HookType,
     M68K,
     MIPS,
@@ -29,7 +29,6 @@ export ARM,
     UcHandle,
     X86,
     code_hook_add!,
-    start,
     interrupt_hook_add!,
     mem_hook_add!,
     mem_map!,
@@ -379,7 +378,7 @@ Emulate machine code in a specific duration of time.
 - return UC_ERR_OK on success, or other value on failure (refer to uc_err enum
   for detailed error).
 """
-function start(
+function start!(
     emu::Emulator;
     address::Integer = 0,
     until::Integer = 0,

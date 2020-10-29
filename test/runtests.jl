@@ -40,7 +40,7 @@ function test_execution()
     end
     code_hook_add!(emu, callback = callback)
 
-    start(
+    start!(
         emu,
         address = UInt64(0x60_00b0 + 0x6),
         until = UInt64(0),
@@ -134,7 +134,7 @@ function test_mem_hook()
     end
 
 
-    res = start(emu, address = 0, until = 0x100, steps = 9)
+    res = start!(emu, address = 0, until = 0x100, steps = 9)
     @show res
 
     @test interrupts[1] == (10, 3)
