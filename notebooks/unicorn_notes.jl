@@ -105,7 +105,7 @@ code = [
 ]
 
 # ╔═╡ adec2540-123d-11eb-0670-43225377f55d
-mem_write(emu, address = 0x1000, bytes = code)
+mem_write!(emu, address = 0x1000, bytes = code)
 
 # ╔═╡ 312648de-123f-11eb-0470-dbeb996846b0
 md"Let's check to see if `text_memory` has been written to."

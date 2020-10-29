@@ -35,13 +35,13 @@ export ARM,
     mem_map,
     mem_map_array,
     mem_regions,
-    mem_write,
+    mem_write!,
     mem_protect,
     mem_read,
     hook_del,
     delete_all_hooks,
     reg_read,
-    reg_write,
+    reg_write!,
     uc_stop,
     unicorn_version,
     instruction_pointer,
@@ -402,7 +402,7 @@ function start(
 
 end
 
-function mem_write(handle::UcHandle; address::UInt64, bytes::Vector{UInt8})
+function mem_write!(handle::UcHandle; address::UInt64, bytes::Vector{UInt8})
     size = length(bytes)
     ptr = pointer(bytes)
     uc_mem_write = Libdl.dlsym(LIBUNICORN, :uc_mem_write)
@@ -425,8 +425,8 @@ written to must be mapped, beforehand, using the `mem_map()` method.
 This method will throw a `UcException` if an attempt is made to write to
 unmapped memory. 
 """
-function mem_write(emu::Emulator; address::Integer, bytes::Vector{UInt8})
-    mem_write(emu.handle[], address = UInt64(address), bytes = bytes)
+function mem_write!(emu::Emulator; address::Integer, bytes::Vector{UInt8})
+    mem_write!(emu.handle[], address = UInt64(address), bytes = bytes)
 end
 
 
@@ -487,7 +487,7 @@ end
 #     reg_read_batch(emu.handle[], [Int(r) for r in registers])
 # end
 
-function reg_write(handle::UcHandle, register::Register, value::Integer)
+function reg_write!(handle::UcHandle, register::Register, value::Integer)
     register = Int(register)
     uc_reg_write = Libdl.dlsym(LIBUNICORN, :uc_reg_write)
     GC.@preserve handle value check(ccall(
@@ -504,8 +504,8 @@ end
 """
 Write a value to an emulator register. May throw a `UcException` if misused.
 """
-function reg_write(emu::Emulator; register::Register, value::Integer)
-    reg_write(emu.handle[], register, UInt64(value))
+function reg_write!(emu::Emulator; register::Register, value::Integer)
+    reg_write!(emu.handle[], register, UInt64(value))
 end
 
 
@@ -881,7 +881,7 @@ end
 function quick()
     emu = Emulator(Arch.X86, Mode.MODE_64)
     mem_map(emu)
-    mem_write(emu, address = 0, bytes = rand(UInt8, 0x1000))
+    mem_write!(emu, address = 0, bytes = rand(UInt8, 0x1000))
     return emu
 end
 

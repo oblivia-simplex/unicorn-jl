@@ -12,9 +12,9 @@ function test_execution()
     code::Vector{UInt8} = [0x48, 0x31, 0xf6, 0x45, 0x85, 0xf6, 0x75, 0xfe, 0xf4]
 
     emu = Emulator(Arch.X86, Mode.MODE_64)
-    reg_write(emu, register = X86.Register.RIP, value = Int(0x0000_0000_0060_00b0))
+    reg_write!(emu, register = X86.Register.RIP, value = Int(0x0000_0000_0060_00b0))
     @test reg_read(emu, X86.Register.RIP) == 0x0000_0000_0060_00b0
-    reg_write(emu, register = X86.Register.EFLAGS, value = Int(0x0000_0000_0000_0246))
+    reg_write!(emu, register = X86.Register.EFLAGS, value = Int(0x0000_0000_0000_0246))
     @test reg_read(emu, X86.Register.EFLAGS) == 0x0000_0000_0000_0246
 
     mem_map(
@@ -24,7 +24,7 @@ function test_execution()
         perms = Perm.NONE,
     )
     mem_protect(emu, address = 0x60_0000, size = 0x1000, perms = Perm.ALL)
-    mem_write(emu, address = UInt64(0x60_00b0), bytes = code)
+    mem_write!(emu, address = UInt64(0x60_00b0), bytes = code)
 
     # Test to ensure that we can read those bytes back
     code_read = mem_read(emu, address = 0x60_00b0, size = length(code))
@@ -86,9 +86,9 @@ function test_mem_hook()
     emu = Emulator(Arch.X86, Mode.MODE_64)
 
     mem_map(emu, address = 0, size = 0x1000)
-    mem_write(emu, address = 0, bytes = code)
+    mem_write!(emu, address = 0, bytes = code)
 
-    reg_write(emu, register = X86.Register.RSP, value = 0x100)
+    reg_write!(emu, register = X86.Register.RSP, value = 0x100)
 
     events::Vector{MemoryEvent} = []
     sizehint!(events, 100)
