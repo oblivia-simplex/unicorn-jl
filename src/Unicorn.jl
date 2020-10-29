@@ -220,6 +220,24 @@ mutable struct Emulator
     end
 end
 
+function word_size(arch::Arch.t, mode::Mode.t)
+    if arch == Arch.X86
+        mode == Mode.MODE_64 && return 8
+        mode == Mode.MODE_32 && return 4
+        mode == Mode.MODE_16 && return 2
+    end
+    (arch == Arch.ARM64 || arch == Arch.ARM) && mode == Mode.THUMB && return 2
+    arch == Arch.ARM && return 4
+    arch == Arch.ARM64 && return 8
+    # TODO: check this:
+    return 4
+end
+
+function word_size(emu::Emulator)
+    word_size(emu.arch, emu.mode)
+end
+    
+
 # Special registers
 function instruction_pointer(arch::Arch.t, mode::Mode.t)::Register
     if arch == Arch.X86
