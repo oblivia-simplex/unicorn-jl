@@ -401,7 +401,7 @@ function start!(
 
 end
 
-function mem_write!(handle::UcHandle; address::UInt64, bytes::Vector{UInt8})
+function mem_write!(handle::UcHandle; address::UInt64, bytes)
     size = length(bytes)
     ptr = pointer(bytes)
     uc_mem_write = Libdl.dlsym(LIBUNICORN, :uc_mem_write)
@@ -424,7 +424,7 @@ written to must be mapped, beforehand, using the `mem_map()` method.
 This method will throw a `UcException` if an attempt is made to write to
 unmapped memory. 
 """
-function mem_write!(emu::Emulator; address::Integer, bytes::Vector{UInt8})
+function mem_write!(emu::Emulator; address::Integer, bytes)
     mem_write!(emu.handle[], address = UInt64(address), bytes = bytes)
 end
 
