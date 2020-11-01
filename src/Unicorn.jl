@@ -39,12 +39,14 @@ export ARM,
     mem_read,
     hook_del!,
     delete_all_hooks!,
+    Register,
     reg_read,
     reg_write!,
-    uc_stop,
+    uc_stop!,
     unicorn_version,
     instruction_pointer,
-    MemoryAccess
+    MemoryAccess,
+    word_size
 
 
 include("./architectures/ARM.jl")
@@ -192,6 +194,9 @@ function uc_close(uc::UcHandle)
     return uc
 end
 
+mutable struct Context
+    ptr::Ptr{Cvoid}
+end
 
 # The unicorn emulator object
 mutable struct Emulator
@@ -200,6 +205,10 @@ mutable struct Emulator
     handle::Ref{UcHandle}
     hooks::Dict{Csize_t, Function}
     array_backed_memory::Dict{UInt64,Array}
+    # TODO # context::Vector{Ptr{Cvoid}}
+    # TODO: implement push_context! and pop_context!
+    # TODO: we probably need a finalizer to call uc_free on the contexts
+    
 
     # Constructor
     Emulator(arch::Arch.t, mode::Mode.t) = begin
@@ -537,7 +546,7 @@ end
 
 # This method is primarily to be used in hooks, where we have access only
 # to the bare UC handle, and not the Emulator wrapper struct.
-function uc_stop(handle::UcHandle)
+function uc_stop!(handle::UcHandle)
     uc_emu_stop = Libdl.dlsym(LIBUNICORN, :uc_emu_stop)
     GC.@preserve handle check(ccall(uc_emu_stop, UcError.t, (UcHandle,), handle))
     return
