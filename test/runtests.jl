@@ -2,6 +2,44 @@ using Test
 
 using Unicorn
 
+function test_closure()
+
+    closure = 
+        let events = []
+            function callback(x, y)
+                push!(events, x+y)
+            end
+        end
+
+    @show closure.events
+
+    closure(2, 3)
+
+    @show closure.events
+
+
+    mem_callback =
+        let foo = []
+            function closure(
+                engine::UcHandle,
+                type::MemoryAccess.t,
+                address::UInt64,
+                size::Cint,
+                data::Int64,
+            )
+                ip_addr = reg_read(engine, X86.Register.RIP)
+                bytes = mem_read(engine, address = address, size = size)
+                event = MemoryEvent(ip_addr, address, type, bytes)
+                #@show event
+                push!(foo, event)
+                return nothing
+            end
+        end
+
+    @show mem_callback.foo
+
+end
+
 function test_execution()
 
     # 0:    4d 31 f6                 xor    r14, r14
@@ -90,11 +128,12 @@ function test_mem_hook()
 
     reg_write!(emu, register = X86.Register.RSP, value = 0x100)
 
-    events::Vector{MemoryEvent} = []
-    sizehint!(events, 100)
+    #events::Vector{MemoryEvent} = []
+    #sizehint!(events, 100)
+    
 
-    mem_callback = begin
-        let events = events
+    mem_callback =
+        let memevents = []
             function closure(
                 engine::UcHandle,
                 type::MemoryAccess.t,
@@ -106,12 +145,13 @@ function test_mem_hook()
                 bytes = mem_read(engine, address = address, size = size)
                 event = MemoryEvent(ip_addr, address, type, bytes)
                 #@show event
-                push!(events, event)
+                push!(memevents, event)
                 return nothing
             end
-            closure
         end
-    end
+
+    @show mem_callback.memevents
+
     mem_hook_add!(
         emu,
         access_type = HookType.MEM_READ | HookType.MEM_WRITE,
@@ -139,6 +179,7 @@ function test_mem_hook()
 
     @test interrupts[1] == (10, 3)
 
+    events = mem_callback.memevents
     @show length(events)
 
     @test events[1].access_type == MemoryAccess.READ
@@ -174,6 +215,7 @@ function test_mem_regions()
 end
 
 @testset "Test Emulator" begin
+    test_closure()
     test_execution()
     test_mem_hook()
     test_mem_regions()
