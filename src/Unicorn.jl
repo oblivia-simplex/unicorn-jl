@@ -4,14 +4,14 @@ module Unicorn
 # I think GC is occasionally cleaning up some of my C-allocated void pointers.
 
 using Libdl
-using unicorn_jll
+using Unicorn_jll
 
 __precompile__()
 
 LIBUNICORN = nothing
 function __init__()
     global LIBUNICORN
-    LIBUNICORN = unicorn_jll.libunicorn_handle
+    LIBUNICORN = Unicorn_jll.libunicorn_handle
 end
 
 export ARM,
