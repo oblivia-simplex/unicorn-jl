@@ -11,11 +11,11 @@ function test_closure()
             end
         end
 
-    @show closure.events
+    @debug closure.events
 
     closure(2, 3)
 
-    @show closure.events
+    @debug closure.events
 
 
     mem_callback =
@@ -30,13 +30,13 @@ function test_closure()
                 ip_addr = reg_read(engine, X86.Register.RIP)
                 bytes = mem_read(engine, address = address, size = size)
                 event = MemoryEvent(ip_addr, address, type, bytes)
-                #@show event
+                #@debug event
                 push!(foo, event)
                 return nothing
             end
         end
 
-    @show mem_callback.foo
+    @debug mem_callback.foo
 
 end
 
@@ -144,13 +144,13 @@ function test_mem_hook()
                 ip_addr = reg_read(engine, X86.Register.RIP)
                 bytes = mem_read(engine, address = address, size = size)
                 event = MemoryEvent(ip_addr, address, type, bytes)
-                #@show event
+                #@debug event
                 push!(memevents, event)
                 return nothing
             end
         end
 
-    @show mem_callback.memevents
+    @debug mem_callback.memevents
 
     mem_hook_add!(
         emu,
@@ -175,12 +175,12 @@ function test_mem_hook()
 
 
     res = start!(emu, address = 0, until = 0x100, steps = 9)
-    @show res
+    @debug res
 
     @test interrupts[1] == (10, 3)
 
     events = mem_callback.memevents
-    @show length(events)
+    @debug events
 
     @test events[1].access_type == MemoryAccess.READ
     @test events[1].address == 0x100 + 8
